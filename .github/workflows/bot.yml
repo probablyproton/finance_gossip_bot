@@ -1,0 +1,76 @@
+name: Gossip Bot
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: gossip-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Remove broken preinstalled apt repos
+        run: |
+          # Known GH-hosted-runner issue: the preregistered Microsoft Azure CLI apt repo
+          # intermittently serves a corrupted signature, which makes apt-get update fail
+          # entirely and takes the unrelated Playwright browser install down with it.
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+
+      - name: Install Playwright browser
+        run: playwright install chromium --with-deps
+
+      - name: Write env file
+        run: |
+          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > my.env
+          echo "TITANS_WATCHLIST=${{ vars.TITANS_WATCHLIST }}" >> my.env
+          echo "NEWS_FRESHNESS_HOURS=48" >> my.env
+          echo "GOSSIP_SEEN_MEMORY_DAYS=14" >> my.env
+          echo "DRY_RUN=false" >> my.env
+
+      - name: Decode Twitter session
+        run: echo "${{ secrets.TWITTER_SESSION }}" | base64 -d > twitter_session.json
+
+      - name: Run bot cycle
+        run: python gossip_bot.py
+
+      - name: Save state back to repo
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git add state.json
+          if git diff --staged --quiet; then
+            echo "No state changes to commit."
+            exit 0
+          fi
+          git commit -m "state: $(date -u +%H:%M)"
+          for i in 1 2 3; do
+            if git push --force origin main; then
+              exit 0
+            fi
+            echo "Push attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::Failed to push state.json after 3 attempts — dedup state is stale on remote, risking duplicate posts until a future run succeeds."
+          exit 1

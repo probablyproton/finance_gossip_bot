@@ -1,0 +1,5 @@
+.env
+my.env
+twitter_session.json
+__pycache__/
+*.pyc
