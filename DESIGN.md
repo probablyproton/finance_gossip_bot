@@ -32,11 +32,17 @@ not present in the source — applies here even more strictly:
    Reuters, WSJ, Fortune, Business Insider, Forbes, CNBC, Axios, Puck, Semafor, Page Six
    Business, NY Post Business, Financial Times, Vanity Fair, The Information. A blocklist
    keeps out satire sites, fabrication mills, and pure stock-tout content farms.
-4. **Business-relevant, not tabloid-invasive.** In scope: boardroom drama, executive
-   departures/firings, lawsuits, feuds, rivalries, PR disasters, wealth/lifestyle stories
-   tied to their public business role. Out of scope: anything that's pure personal-life
-   intrusion with no business angle, health details, or family details not central to a
-   genuine business story.
+4. **Personal drama, not routine business news in disguise.** This account is the paparazzi
+   of finance, not a business-news feed with spicier headlines. In scope: divorce/custody
+   battles, affairs, addiction/rehab, arrests, and personal feuds/fights -- situations these
+   people would rather not be in at all. Out of scope: a business deal, merger, or political
+   alliance framed with dramatic language ("feud," "rivalry," "clash") is NOT gossip just
+   because the headline uses conflict words. Real example that slipped through and had to be
+   excluded: "Trump And Musk Have Now Turned Their Bitter Feud Into A $100 Million Alliance"
+   — a business/political deal story, not personal drama. `BUSINESS_OUTCOME_RE` in
+   `gossip_bot.py` is the mechanism that catches this: it rejects a headline that matched a
+   gossip-signal word if it ALSO mentions a deal/alliance/merger outcome, since a genuine
+   personal feud headline never does.
 5. **No financial advice, no market-moving insinuation.** Never frame a story as investment
    guidance, and never imply insider-trading-adjacent claims without the source itself
    making that claim.

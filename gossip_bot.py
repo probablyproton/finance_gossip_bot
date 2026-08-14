@@ -62,11 +62,32 @@ SESSION_FILE = "twitter_session.json"
 # product-leak headlines, "controversy"/"apology"/"criticizes" fire on any policy/PR story.
 # Kept only words that specifically signal interpersonal conflict/drama, not routine business
 # events or general criticism of a decision.
+# Expanded with explicit tabloid/personal-life categories per the account's actual mandate
+# (see DESIGN.md): divorce, cheating, addiction, personal fights -- the paparazzi of finance,
+# not a business-news feed with spicier headlines.
 GOSSIP_SIGNAL_RE = re.compile(
     r"\b(feud|lawsuit|sues?|sued|fired|ousted|slams?|blasts?(?:ed)?|"
-    r"scandal|divorce|rivalry|clash(?:es)?|accus\w+|"
+    r"scandal|divorce|divorc\w+|affair|cheat(?:s|ed|ing)?|mistress|infidelit\w+|"
+    r"break-?up|broke\s+up|estranged|custody|prenup|"
+    r"addiction|rehab|relapse[ds]?|overdose[ds]?|arrest(?:ed)?|jail(?:ed)?|indict\w+|"
+    r"rivalry|clash(?:es)?|accus\w+|"
     r"drama|shake-?up|expos(?:e|es|ed)|rift|fallout|"
     r"blow-?up|meltdown|showdown|spat|snub(?:s|bed)?|brawl)\b",
+    re.I,
+)
+
+# Negative filter: reject a headline even if it matched a gossip-signal word above, when the
+# same headline is clearly framing a resolved BUSINESS or political arrangement rather than
+# personal drama. Confirmed live: "Trump And Musk Have Now Turned Their Bitter Feud Into A
+# $100 Million Alliance" matched "feud" but is a business/political deal story, not gossip --
+# exactly the kind of routine business news dressed up in dramatic language this account
+# should never post. This is deliberately the ONLY disambiguation mechanism for words like
+# "feud"/"rivalry"/"clash" that are genuinely ambiguous between personal and professional
+# conflict -- a real personal feud headline won't also mention a deal/alliance/merger.
+BUSINESS_OUTCOME_RE = re.compile(
+    r"\b(alliance|merger|acquisition|partnership|joint\s+venture|venture|ipo|buyout|"
+    r"takeover|tie-?up|team(?:s|ed)?\s+up|joins?\s+forces|stake|funding\s+round|"
+    r"board\s+seat)\b",
     re.I,
 )
 
@@ -116,7 +137,7 @@ def _prune_date_keyed_dict(d: dict, max_age_days: int):
 
 
 def _is_gossip_worthy(headline: str) -> bool:
-    return bool(GOSSIP_SIGNAL_RE.search(headline))
+    return bool(GOSSIP_SIGNAL_RE.search(headline)) and not BUSINESS_OUTCOME_RE.search(headline)
 
 
 _GOOGLE_NEWS_SIG_RE = re.compile(r'data-n-a-sg="([^"]+)"')
