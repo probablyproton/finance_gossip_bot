@@ -604,15 +604,20 @@ def post_quote_tweet(tweet_url: str, state: dict) -> bool:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(storage_state=SESSION_FILE)
             page = context.new_page()
-            # Deliberately no &text= param here -- confirmed live that passing it AND
-            # filling the textarea ourselves double-writes the opener ("Worth a look: ...
-            # Worth a look:"), because .fill() on X's contenteditable compose box doesn't
-            # reliably clear content the URL param already prefilled. One write, one source
-            # of truth.
-            intent_url = f"https://x.com/intent/tweet?url={quote(tweet_url, safe='')}"
+            # Both text and url go through the intent URL's own params -- confirmed live
+            # this is the ONE reliable way to get both the opener text AND the quoted-tweet
+            # embed card in the same post. Do NOT also call .fill() on the textarea: it does
+            # a select-all-and-replace on X's contenteditable box, which either duplicated
+            # the opener (when it landed after the url param's text already rendered) or, worse,
+            # wiped out the still-loading quote-tweet embed entirely (when it landed before
+            # the async card render finished) -- confirmed live as bare, sourceless posts.
+            intent_url = (f"https://x.com/intent/tweet?url={quote(tweet_url, safe='')}"
+                          f"&text={quote(opener, safe='')}")
             page.goto(intent_url)
             page.wait_for_selector('[data-testid="tweetTextarea_0"]', timeout=15000)
-            page.fill('[data-testid="tweetTextarea_0"]', opener)
+            # Give the async quote-tweet embed card time to actually attach before
+            # submitting -- clicking too early risks posting before it's rendered.
+            page.wait_for_timeout(3000)
             page.click('[data-testid="tweetButton"]')
             page.wait_for_timeout(3000)
             browser.close()
