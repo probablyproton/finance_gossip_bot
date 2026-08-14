@@ -17,6 +17,7 @@ GitHub:     runs on workflow_dispatch, same external-cadence model as the ticker
 import os
 import re
 import json
+import time
 import random
 import logging
 import datetime
@@ -42,6 +43,8 @@ TITANS_WATCHLIST = [n.strip() for n in os.getenv("TITANS_WATCHLIST", "").split("
 DRY_RUN          = os.getenv("DRY_RUN", "true").lower() == "true"
 NEWS_FRESHNESS_HOURS = int(os.getenv("NEWS_FRESHNESS_HOURS", "48"))
 GOSSIP_SEEN_MEMORY_DAYS = int(os.getenv("GOSSIP_SEEN_MEMORY_DAYS", "14"))
+MAX_POSTS_PER_CYCLE = int(os.getenv("MAX_POSTS_PER_CYCLE", "3"))
+POST_PACING_SECONDS = int(os.getenv("POST_PACING_SECONDS", "45"))
 
 STATE_FILE   = "state.json"
 SESSION_FILE = "twitter_session.json"
@@ -243,10 +246,13 @@ def _passes_gossip_filters(a: dict, cutoff: datetime.datetime, seen: dict) -> bo
     return _dedup_key(a) not in seen
 
 
-def find_gossip_item(state: dict) -> dict | None:
-    """Freshest, real, gossip-worthy, not-yet-used story — either about someone on the
-    named watchlist, or surfaced by a broad industry-wide topic search that needs no
-    pre-known name at all (see INDUSTRY_TOPIC_QUERIES)."""
+def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
+    """Up to max_items freshest, real, gossip-worthy, not-yet-used stories — either about
+    someone on the named watchlist, or surfaced by a broad industry-wide topic search that
+    needs no pre-known name at all (see INDUSTRY_TOPIC_QUERIES). One fetch pass regardless
+    of max_items — callers wanting multiple posts in a cycle should call this once with
+    max_items=N, not call a single-item version N times (would re-fetch all ~59 queries
+    per post)."""
     seen = state.setdefault("gossip_seen", {})
     _prune_date_keyed_dict(seen, GOSSIP_SEEN_MEMORY_DAYS)
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=NEWS_FRESHNESS_HOURS)
@@ -264,12 +270,39 @@ def find_gossip_item(state: dict) -> dict | None:
                 candidates.append({**a, "person": "industry-wide", "fingerprint": _dedup_key(a)})
 
     if not candidates:
-        return None
+        return []
 
     # Freshest first, then float credible sources above generic aggregators.
     candidates.sort(key=lambda a: a["published"], reverse=True)
     candidates.sort(key=lambda a: 0 if (a.get("source") or "").lower() in PREFERRED_SOURCES else 1)
-    return candidates[0]
+
+    # Dedup across candidates themselves — the same underlying story routinely surfaces
+    # twice (once per-person, once via the topic search) with a different link AND slightly
+    # different headline wording (confirmed live: "Person A sued..." vs "Person A sued...,
+    # court filing shows" — an exact-string check misses this entirely), so this needs a
+    # real similarity check, not just an exact match.
+    picked = []
+    for c in candidates:
+        if any(_headline_similarity(c["headline"], p["headline"]) >= SAME_STORY_OVERLAP_THRESHOLD
+               for p in picked):
+            continue
+        picked.append(c)
+        if len(picked) >= max_items:
+            break
+    return picked
+
+
+SAME_STORY_OVERLAP_THRESHOLD = 0.5
+
+
+def _headline_similarity(a: str, b: str) -> float:
+    """Word-overlap ratio (Jaccard-style) between two headlines — catches the same story
+    reworded across outlets/searches without needing exact-string equality."""
+    wa = set(re.findall(r"[a-z0-9]+", a.lower()))
+    wb = set(re.findall(r"[a-z0-9]+", b.lower()))
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
 
 
 def generate_tweet(item: dict) -> str:
@@ -321,23 +354,32 @@ def post_tweet(text: str, state: dict) -> bool:
 
 def run_cycle():
     state = load_state()
-    item = find_gossip_item(state)
-    if not item:
+    items = find_gossip_items(state, max_items=MAX_POSTS_PER_CYCLE)
+    if not items:
         log.info("No fresh, gossip-worthy, unused story found this cycle.")
         return
 
-    # Only resolve the single winning item's link, not every candidate — this hits
-    # Google's redirect-decode endpoint, an extra request worth paying for once, not once
-    # per candidate scanned.
-    item["link"] = _resolve_google_news_url(item.get("link", ""))
+    posted = 0
+    for i, item in enumerate(items):
+        # Only resolve the links of items actually being posted, not every candidate scanned
+        # — each resolution is an extra request to Google's redirect-decode endpoint.
+        item["link"] = _resolve_google_news_url(item.get("link", ""))
+        tweet = generate_tweet(item)
+        if not post_tweet(tweet, state):
+            break  # a post failure (e.g. session expired) — don't keep trying the rest
+        posted += 1
+        if not DRY_RUN:
+            # Only mark seen / persist state on a real post — a dry run must have zero
+            # lasting effect, or an item it just previewed would be silently blocked from
+            # actually being posted on the next real run.
+            state.setdefault("gossip_seen", {})[item["fingerprint"]] = today()
+            save_state(state)
+            if i < len(items) - 1:
+                # Brief pacing gap between multiple posts in one cycle so they don't land
+                # seconds apart — reads as paced coverage, not a bot dumping a queue.
+                time.sleep(POST_PACING_SECONDS)
 
-    tweet = generate_tweet(item)
-    if post_tweet(tweet, state) and not DRY_RUN:
-        # Only mark the story seen (and persist state) on a real post — a dry run must have
-        # zero lasting effect, or the item it just previewed would be silently blocked from
-        # actually being posted on the next real run.
-        state.setdefault("gossip_seen", {})[item["fingerprint"]] = today()
-        save_state(state)
+    log.info("Posted %d/%d item(s) this cycle (cap: %d).", posted, len(items), MAX_POSTS_PER_CYCLE)
 
 
 if __name__ == "__main__":

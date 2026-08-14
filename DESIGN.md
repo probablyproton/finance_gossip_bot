@@ -98,14 +98,32 @@ A topic-search hit is tagged `person: "industry-wide"` rather than a specific na
 dedup keys off the article's link rather than a name+headline pair, since a topic hit has no
 pre-known person to key off of.
 
+## Cadence and multi-post
+
+Runs on GitHub Actions' own native cron (`schedule: - cron: "*/30 * * * *"` in `bot.yml`) —
+no external dispatcher needed, unlike the ticker bot's model. Each cycle can post up to
+`MAX_POSTS_PER_CYCLE` (default 3) distinct stories in one run, found from a single fetch pass
+(not by re-fetching per post), with a `POST_PACING_SECONDS` gap (default 45s) between
+successive posts in the same cycle so they don't land seconds apart. A manual
+`workflow_dispatch` run still has the dry-run checkbox; a scheduled cron run always runs live.
+
+Cross-candidate dedup uses a real word-overlap similarity check (`_headline_similarity`,
+threshold 0.5), not exact-string matching — confirmed live that the same story routinely
+surfaces via both the per-person and topic searches with slightly different wording
+("Person A sued..." vs "Person A sued..., court filing shows"), which an exact match misses
+entirely.
+
 ## Architecture
 
 Reused as-is from the ticker bot (proven, doesn't need reinventing):
 - RSS/Google News fetch-and-parse pattern (per-entity query instead of per-ticker)
 - Date-keyed fingerprint dedup + pruning (`_prune_date_keyed_dict`-style)
 - Source-quality preference sorting
+- Google News redirect-URL resolution (`_resolve_google_news_url`) so posts link to the real
+  article, not a Google interstitial — re-verified live before porting, since it's an
+  unofficial/reverse-engineered endpoint Google could change
 - Playwright-based X posting + session-cookie login flow
-- `my.env`-driven config, `DRY_RUN` support, GitHub Actions `workflow_dispatch` deployment
+- `my.env`-driven config, `DRY_RUN` support, GitHub Actions deployment
 
 New / different (no price data exists for a person, so none of this carries over):
 - No ticker/price/currency logic at all
