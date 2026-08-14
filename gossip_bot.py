@@ -90,16 +90,16 @@ def _is_gossip_worthy(headline: str) -> bool:
     return bool(GOSSIP_SIGNAL_RE.search(headline))
 
 
-def fetch_person_news(name: str, max_items: int = 10) -> list[dict]:
-    """Google News RSS search for a named individual — same feed pattern the ticker bot
-    used per-symbol, just with a person's name as the query instead of a company name."""
-    url = f"https://news.google.com/rss/search?q={quote(name)}&hl=en-US&gl=US&ceid=US:en"
+def _fetch_google_news_rss(query: str, max_items: int, log_label: str) -> list[dict]:
+    """Google News RSS search for an arbitrary query string — shared by both the per-person
+    watchlist search and the industry-wide topic search below."""
+    url = f"https://news.google.com/rss/search?q={quote(query)}&hl=en-US&gl=US&ceid=US:en"
     try:
         resp = requests.get(url, timeout=10, verify=False, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
         root = ET.fromstring(resp.content)
     except Exception as e:
-        log.warning("News fetch failed for %s: %s", name, e)
+        log.warning("News fetch failed for %s: %s", log_label, e)
         return []
 
     results = []
@@ -130,6 +130,29 @@ def fetch_person_news(name: str, max_items: int = 10) -> list[dict]:
     return results
 
 
+def fetch_person_news(name: str, max_items: int = 10) -> list[dict]:
+    """Google News RSS search for a named individual on the watchlist."""
+    return _fetch_google_news_rss(name, max_items, log_label=name)
+
+
+# Broad, name-agnostic searches — this is what catches a real story like John Overdeck's
+# $6.2B divorce (Two Sigma's co-founder, absolutely a "financial titan" but not someone
+# anyone thought to put on a fixed name list in advance). A curated watchlist, no matter how
+# broad, always has blind spots; this is the actual fix for that, not just a bigger list.
+INDUSTRY_TOPIC_QUERIES = [
+    '("hedge fund" OR "private equity" OR "Wall Street" OR "billionaire investor" OR '
+    '"fund manager") (divorce OR lawsuit OR sues OR sued OR feud OR fired OR resigns OR '
+    'scandal OR fraud OR indicted OR ousted)',
+    '("hedge fund" OR "fund founder" OR "fund CEO" OR "fund co-founder") '
+    '(court battle OR settlement OR subpoena OR SEC probe)',
+]
+
+
+def fetch_topic_news(query: str, max_items: int = 15) -> list[dict]:
+    """Google News RSS search for a broad industry theme, not tied to any specific name."""
+    return _fetch_google_news_rss(query, max_items, log_label=f"topic:{query[:40]}...")
+
+
 def load_state() -> dict:
     if os.path.exists(STATE_FILE):
         try:
@@ -155,29 +178,42 @@ def save_state(state: dict):
             pass
 
 
-def find_gossip_item(state: dict) -> dict | None:
-    """Freshest, real, gossip-worthy, not-yet-used story about anyone on the watchlist."""
-    if not TITANS_WATCHLIST:
-        log.warning("TITANS_WATCHLIST is empty — nothing to look for.")
-        return None
+def _dedup_key(a: dict) -> str:
+    # Link-based, not person-based — a topic-search hit has no pre-known "person" attached,
+    # and a link is inherently unique per article regardless of which query surfaced it.
+    # Falls back to the headline if a feed ever omits a link.
+    return (a.get("link") or a["headline"]).strip().lower()
 
+
+def _passes_gossip_filters(a: dict, cutoff: datetime.datetime, seen: dict) -> bool:
+    if not a.get("published") or a["published"] < cutoff:
+        return False
+    if not _is_gossip_worthy(a["headline"]):
+        return False
+    if (a.get("source") or "").lower() in BLOCKLIST_SOURCES:
+        return False
+    return _dedup_key(a) not in seen
+
+
+def find_gossip_item(state: dict) -> dict | None:
+    """Freshest, real, gossip-worthy, not-yet-used story — either about someone on the
+    named watchlist, or surfaced by a broad industry-wide topic search that needs no
+    pre-known name at all (see INDUSTRY_TOPIC_QUERIES)."""
     seen = state.setdefault("gossip_seen", {})
     _prune_date_keyed_dict(seen, GOSSIP_SEEN_MEMORY_DAYS)
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=NEWS_FRESHNESS_HOURS)
 
     candidates = []
+
     for name in TITANS_WATCHLIST:
         for a in fetch_person_news(name):
-            if not a.get("published") or a["published"] < cutoff:
-                continue
-            if not _is_gossip_worthy(a["headline"]):
-                continue
-            if (a.get("source") or "").lower() in BLOCKLIST_SOURCES:
-                continue
-            fp = f"{name.lower()}:{a['headline'].strip().lower()}"
-            if fp in seen:
-                continue
-            candidates.append({**a, "person": name, "fingerprint": fp})
+            if _passes_gossip_filters(a, cutoff, seen):
+                candidates.append({**a, "person": name, "fingerprint": _dedup_key(a)})
+
+    for query in INDUSTRY_TOPIC_QUERIES:
+        for a in fetch_topic_news(query):
+            if _passes_gossip_filters(a, cutoff, seen):
+                candidates.append({**a, "person": "industry-wide", "fingerprint": _dedup_key(a)})
 
     if not candidates:
         return None

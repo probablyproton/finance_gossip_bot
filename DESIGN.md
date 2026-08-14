@@ -48,9 +48,55 @@ A starter list of named individuals (the people-equivalent of the ticker bot's
 `EU_WATCHLIST`/`US_WATCHLIST`), configured via `TITANS_WATCHLIST` in `my.env` — easy to
 expand or trim later:
 
-Elon Musk, Warren Buffett, Jamie Dimon, Jeff Bezos, Mark Zuckerberg, Bill Ackman,
-Ken Griffin, Larry Fink, Ray Dalio, Carl Icahn, Bernard Arnault, Jensen Huang, Sam Altman,
-Cathie Wood, David Solomon
+**Hedge fund managers:** Ray Dalio, Ken Griffin, Bill Ackman, Carl Icahn, David Tepper,
+Steve Cohen, Israel Englander, Paul Tudor Jones, Daniel Loeb, David Einhorn,
+Stanley Druckenmiller, George Soros, John Paulson, Chase Coleman, Philippe Laffont,
+Cliff Asness, Seth Klarman, Michael Burry, Bill Hwang, Nelson Peltz, Larry Robbins,
+Howard Marks, Jim Chanos
+
+**Bank CEOs:** Jamie Dimon, David Solomon, Jane Fraser, Brian Moynihan, Charlie Scharf
+
+**Private equity / asset management:** Larry Fink, Stephen Schwarzman, Henry Kravis,
+David Rubenstein, Jonathan Gray, Marc Rowan
+
+**Policymakers:** Jerome Powell, Janet Yellen
+
+**Billionaire investors / tech-finance crossover:** Warren Buffett, Bernard Arnault,
+Elon Musk, Jeff Bezos, Mark Zuckerberg, Sam Altman, Jensen Huang, Cathie Wood, Bill Gates,
+Peter Thiel, Marc Andreessen, Chamath Palihapitiya, Michael Saylor
+
+**Crypto (frequent scandal/legal drama):** Sam Bankman-Fried, Changpeng Zhao, Do Kwon
+
+**Legendary-drama / disgraced figures:** Adam Neumann, Elizabeth Holmes, Rupert Murdoch
+
+**Quant funds:** John Overdeck, David Siegel (Two Sigma co-founders — added after their
+$6.2B divorce case, see below, exposed the gap this list alone can't close)
+
+57 names total. Note: a much larger watchlist means proportionally more Google News RSS
+requests per cycle (one per name) — still cheap/fast individually, but worth knowing if
+run frequency ever needs tuning against rate limits.
+
+### Why a name list alone isn't enough
+
+A real test case: the NY Post story on John Overdeck (Two Sigma co-founder) and his wife
+Laura's $6.2B divorce battle was exactly the kind of story this account should catch — but
+he wasn't on the watchlist at the time, because no fixed list of names, however broad, can
+anticipate every billionaire who might end up in a headline-worthy dispute. Two Sigma alone
+manages $80B; there are hundreds of similarly-sized funds and firms whose principals aren't
+individually famous enough to make an initial list.
+
+So `gossip_bot.py` runs two parallel search mechanisms, not one:
+1. **Per-person search** — the named watchlist above, same as before.
+2. **Industry-wide topic search** (`INDUSTRY_TOPIC_QUERIES`) — broad Google News searches
+   like `("hedge fund" OR "private equity" OR "Wall Street") (divorce OR lawsuit OR fired OR
+   scandal OR ...)`, with no specific name required at all. This is what actually closes the
+   blind-spot problem, not just a bigger list. Modeled directly on the ticker bot's
+   evergreen-opinion feature, which used the same broad-topic-query pattern for
+   sector-level content instead of per-ticker-only search.
+
+A topic-search hit is tagged `person: "industry-wide"` rather than a specific name, and
+dedup keys off the article's link rather than a name+headline pair, since a topic hit has no
+pre-known person to key off of.
 
 ## Architecture
 
