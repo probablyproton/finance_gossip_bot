@@ -23,9 +23,11 @@ not present in the source — applies here even more strictly:
 1. **Aggregate, never fabricate.** Every post summarizes an already-published story from a
    real, named outlet, with a link to it. The bot (and any LLM step) never originates a
    claim, quote, or scenario of its own.
-2. **Attribute, never assert.** Framing is always "according to *Outlet*" / "as first
-   reported by *Outlet*" — never stated as settled fact, even when the source itself is
-   confident. This protects against a source turning out to be wrong later.
+2. **Attribute, never assert.** Every post carries the actual publisher's link (and X's own
+   link-preview card shows that domain), so the source is always visible — v1 dropped the
+   redundant "(via *Outlet*)" text line since it just restated what the link already shows,
+   but the underlying principle is unchanged: nothing here is framed as this account's own
+   settled claim, only as what a named, linked outlet reported.
 3. **Source quality gate.** Only pulls from credible business/gossip press — Bloomberg,
    Reuters, WSJ, Fortune, Business Insider, Forbes, CNBC, Axios, Puck, Semafor, Page Six
    Business, NY Post Business, Financial Times, Vanity Fair, The Information. A blocklist

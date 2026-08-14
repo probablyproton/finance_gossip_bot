@@ -69,17 +69,30 @@ jobs:
       - name: Save state back to repo
         if: always()
         run: |
+          # NEVER use `git push --force` here. It previously destroyed a real code commit
+          # ("Add real article context...") that landed on origin between this job's checkout
+          # and this step running -- the force push overwrote origin's tip with a branch based
+          # on this job's now-stale checkout, silently discarding that commit. Confirmed via
+          # `git log`: the resulting state commit's parent was the OLD tip, not the one that
+          # commit had already been pushed on top of.
+          #
+          # Fix: re-fetch + soft-reset to the CURRENT origin/main tip immediately before
+          # committing, every retry attempt -- this guarantees our state commit's parent is
+          # always whatever is actually on origin at push time, so a normal (non-force) push
+          # is always a clean fast-forward that can never clobber another commit.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git add state.json
-          if git diff --staged --quiet; then
-            echo "No state changes to commit."
-            exit 0
-          fi
-          git commit -m "state: $(date -u +%H:%M)"
           for i in 1 2 3; do
-            if git push --force origin main; then
+            git fetch origin main
+            git reset --soft origin/main
+            git add state.json
+            if git diff --staged --quiet; then
+              echo "No state changes to commit."
+              exit 0
+            fi
+            git commit -m "state: $(date -u +%H:%M)"
+            if git push origin main; then
               exit 0
             fi
             echo "Push attempt $i failed, retrying in 5s..."

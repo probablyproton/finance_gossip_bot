@@ -77,6 +77,24 @@ PREFERRED_SOURCES = {s.lower() for s in [
     "Financial Times", "The Information", "Vanity Fair", "Barron", "Barron's",
 ]}
 
+# Not a credibility judgment — these are legitimate publications — but confirmed live (direct
+# fetch returned HTTP 403) that they block plain automated requests, which breaks two things:
+# X's own link-preview crawler can't build a rich card (falls back to the site's generic
+# logo instead of an article photo), and our own fetch_article_context silently gets nothing.
+# Ranked below normal (non-preferred) sources so an equally-good alternative outlet covering
+# the same story wins instead, when one exists — the story itself is still fine, only the
+# specific link is worse.
+CRAWLER_UNFRIENDLY_SOURCES = {s.lower() for s in ["inc.com", "inc"]}
+
+
+def _source_rank(a: dict) -> int:
+    src = (a.get("source") or "").lower()
+    if src in PREFERRED_SOURCES:
+        return 0
+    if src in CRAWLER_UNFRIENDLY_SOURCES:
+        return 2
+    return 1
+
 
 def today() -> str:
     return datetime.date.today().isoformat()
@@ -317,7 +335,7 @@ def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
 
     # Freshest first, then float credible sources above generic aggregators.
     candidates.sort(key=lambda a: a["published"], reverse=True)
-    candidates.sort(key=lambda a: 0 if (a.get("source") or "").lower() in PREFERRED_SOURCES else 1)
+    candidates.sort(key=_source_rank)
 
     # Dedup across candidates themselves — the same underlying story routinely surfaces
     # twice (once per-person, once via the topic search) with a different link AND slightly
@@ -364,50 +382,58 @@ def _clean_headline(headline: str) -> str:
 
 MAX_HEADLINE_LEN_WITH_CONTEXT = 100
 
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+
+
+def _split_sentences(text: str) -> str:
+    """Break a multi-sentence headline/excerpt onto separate lines so each thought reads on
+    its own instead of running together as one dense paragraph (e.g. "Trump's Truth Social
+    Feed Costs Wall Street $100,000 a Month. Now a Lawsuit Could Undercut It" -> two lines).
+    Heuristic (sentence-end punctuation followed by a capital letter) — can occasionally
+    mis-split on an abbreviation like "Mr." or "U.S.", a known tradeoff for a formatting-only
+    pass with no LLM involved."""
+    if not text:
+        return text
+    sentences = _SENTENCE_SPLIT_RE.split(text)
+    return "\n\n".join(s.strip() for s in sentences if s.strip())
+
 
 def generate_tweet(item: dict) -> str:
-    """Zero-LLM v1 template — always attributes, never asserts the headline as settled
-    fact, always includes the link so readers can verify it themselves.
+    """Zero-LLM v1 template — never asserts the headline as settled fact, always includes
+    the link so readers can verify it themselves. No explicit "(via X)" attribution line —
+    the link's own domain (and X's link-preview card) already shows the source, so a
+    separate text line just restating it is redundant clutter.
 
-    Headline leads, attribution trails on its own line — NOT "Word from X: {headline}",
-    which reads as an awkward run-on whenever a headline has its own internal colon/label
-    (confirmed live: "Word from eFinancialCareers: Morning Coffee: Hedge fund divorce
-    dramas..." stacked three labels deep). Leading with the headline avoids that regardless
-    of the headline's own structure, without needing to guess/rewrite its wording.
-
-    When item["context"] (the article's own opening paragraph, see fetch_article_context)
-    is available, it's inserted between headline and attribution — the actual substance that
-    makes clicking the link unnecessary. The headline gets capped at
+    Headline leads. When item["context"] (the article's own opening paragraph, see
+    fetch_article_context) is available, it's inserted below the headline — the actual
+    substance that makes clicking the link unnecessary. The headline gets capped at
     MAX_HEADLINE_LEN_WITH_CONTEXT in that case so the context (where the real information
     lives) gets most of the remaining room, rather than an even split."""
-    source = item.get("source") or "a recent report"
-    headline = _clean_headline(item["headline"])
-    context = item.get("context") or ""
+    headline = _split_sentences(_clean_headline(item["headline"]))
+    context = _split_sentences(item.get("context") or "")
     link = item.get("link") or ""
 
-    attribution = f"(via {source})"
     # X counts any URL as a fixed ~23 characters (t.co shortening) regardless of its real
     # length. Using the link's raw length here instead severely over-truncated the headline
     # whenever the link was a long Google News redirect blob (confirmed live: a real headline
     # got crushed down to "Wife of hedge…").
     link_budget = (2 + 23) if link else 0  # blank line + 23-char shortened link
-    fixed_budget = len(attribution) + 2 + link_budget  # attribution + its leading blank line + link
 
     if context:
         max_headline_len = MAX_HEADLINE_LEN_WITH_CONTEXT
         if len(headline) > max_headline_len:
             headline = headline[:max_headline_len].rsplit(" ", 1)[0] + "…"
-        max_context_len = 280 - fixed_budget - len(headline) - 2  # 2 for blank line before context
+        max_context_len = 280 - link_budget - len(headline) - 2  # 2 for blank line before context
         if len(context) > max_context_len:
             context = context[:max_context_len].rsplit(" ", 1)[0] + "…"
         body = f"{headline}\n\n{context}"
     else:
-        max_headline_len = 280 - fixed_budget
+        max_headline_len = 280 - link_budget
         if len(headline) > max_headline_len:
             headline = headline[:max_headline_len].rsplit(" ", 1)[0] + "…"
         body = headline
 
-    text = f"{body}\n\n{attribution}"
+    text = body
     if link:
         text += f"\n\n{link}"
     return text
