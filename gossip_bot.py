@@ -23,6 +23,7 @@ import logging
 import datetime
 import tempfile
 import requests
+import html as html_module
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
@@ -139,6 +140,48 @@ def _resolve_google_news_url(link: str) -> str:
     except Exception as e:
         log.warning("Google News URL resolve failed, keeping original link: %s", e)
         return link
+
+
+_NAV_JUNK_RE = re.compile(
+    r"\b(subscribe|sign up|newsletter|cookie|log\s*in|advertisement|follow us|read more|"
+    r"share this|related articles|menu|sections|navigation|Add The .+ on Google)\b",
+    re.I,
+)
+
+# Real prose is dense with short function words ("the", "of", "a", "his", "but", ...); a
+# nav/breadcrumb block strung from Title Case category labels ("US News Metro Long Island
+# Politics World News...") has almost none. Confirmed live: NY Post's own markup has TWO
+# separate nav/breadcrumb <p> blocks before the real article text, and keyword-blocking alone
+# didn't catch both — this catches the shape of the noise instead of naming every instance.
+_FUNCTION_WORDS_RE = re.compile(
+    r"\b(the|a|an|of|in|to|and|is|was|but|for|with|he|she|his|her|that|on|as|by)\b", re.I)
+_MIN_FUNCTION_WORD_HITS = 5
+
+
+def fetch_article_context(url: str, max_chars: int = 300) -> str:
+    """Best-effort extraction of the article's own opening paragraph, so the tweet can carry
+    real substance instead of just a headline — confirmed empirically that Google News RSS's
+    <description> gives nothing beyond the headline itself (just an HTML restatement), while
+    direct outlet feeds (Page Six, NY Post) DO have genuine excerpts. Rather than depending on
+    which search path happened to find a story, this fetches the resolved article URL
+    directly and works the same way regardless of source. Returns '' on any failure — a fetch
+    failure just means a shorter tweet, never fabricated content."""
+    if not url:
+        return ""
+    try:
+        resp = requests.get(url, timeout=10, verify=False, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        body = re.sub(r"(?is)<script.*?</script>|<style.*?</style>", " ", resp.text)
+        for p in re.findall(r"(?is)<p[^>]*>(.*?)</p>", body):
+            text = re.sub(r"\s+", " ", html_module.unescape(re.sub(r"<[^>]+>", " ", p))).strip()
+            if len(text) < 80 or _NAV_JUNK_RE.search(text):
+                continue
+            if len(_FUNCTION_WORDS_RE.findall(text)) < _MIN_FUNCTION_WORD_HITS:
+                continue  # reads like a nav/breadcrumb block, not a real sentence
+            return text[:max_chars]
+    except Exception as e:
+        log.warning("Article context fetch failed for %s: %s", url, e)
+    return ""
 
 
 def _fetch_google_news_rss(query: str, max_items: int, log_label: str) -> list[dict]:
@@ -319,6 +362,9 @@ def _clean_headline(headline: str) -> str:
     return _COLUMN_BRAND_PREFIX_RE.sub("", headline).strip()
 
 
+MAX_HEADLINE_LEN_WITH_CONTEXT = 100
+
+
 def generate_tweet(item: dict) -> str:
     """Zero-LLM v1 template — always attributes, never asserts the headline as settled
     fact, always includes the link so readers can verify it themselves.
@@ -327,9 +373,16 @@ def generate_tweet(item: dict) -> str:
     which reads as an awkward run-on whenever a headline has its own internal colon/label
     (confirmed live: "Word from eFinancialCareers: Morning Coffee: Hedge fund divorce
     dramas..." stacked three labels deep). Leading with the headline avoids that regardless
-    of the headline's own structure, without needing to guess/rewrite its wording."""
+    of the headline's own structure, without needing to guess/rewrite its wording.
+
+    When item["context"] (the article's own opening paragraph, see fetch_article_context)
+    is available, it's inserted between headline and attribution — the actual substance that
+    makes clicking the link unnecessary. The headline gets capped at
+    MAX_HEADLINE_LEN_WITH_CONTEXT in that case so the context (where the real information
+    lives) gets most of the remaining room, rather than an even split."""
     source = item.get("source") or "a recent report"
     headline = _clean_headline(item["headline"])
+    context = item.get("context") or ""
     link = item.get("link") or ""
 
     attribution = f"(via {source})"
@@ -338,11 +391,23 @@ def generate_tweet(item: dict) -> str:
     # whenever the link was a long Google News redirect blob (confirmed live: a real headline
     # got crushed down to "Wife of hedge…").
     link_budget = (2 + 23) if link else 0  # blank line + 23-char shortened link
-    max_len = 280 - len(attribution) - 2 - link_budget  # 2 for the blank line before attribution
-    if len(headline) > max_len:
-        headline = headline[:max_len].rsplit(" ", 1)[0] + "…"
+    fixed_budget = len(attribution) + 2 + link_budget  # attribution + its leading blank line + link
 
-    text = f"{headline}\n\n{attribution}"
+    if context:
+        max_headline_len = MAX_HEADLINE_LEN_WITH_CONTEXT
+        if len(headline) > max_headline_len:
+            headline = headline[:max_headline_len].rsplit(" ", 1)[0] + "…"
+        max_context_len = 280 - fixed_budget - len(headline) - 2  # 2 for blank line before context
+        if len(context) > max_context_len:
+            context = context[:max_context_len].rsplit(" ", 1)[0] + "…"
+        body = f"{headline}\n\n{context}"
+    else:
+        max_headline_len = 280 - fixed_budget
+        if len(headline) > max_headline_len:
+            headline = headline[:max_headline_len].rsplit(" ", 1)[0] + "…"
+        body = headline
+
+    text = f"{body}\n\n{attribution}"
     if link:
         text += f"\n\n{link}"
     return text
@@ -408,6 +473,9 @@ def run_cycle():
         # Only resolve the links of items actually being posted, not every candidate scanned
         # — each resolution is an extra request to Google's redirect-decode endpoint.
         item["link"] = _resolve_google_news_url(item.get("link", ""))
+        # Same principle for the context fetch — it's what makes clicking the link
+        # unnecessary, but only worth the extra request for items actually being posted.
+        item["context"] = fetch_article_context(item["link"])
         tweet = generate_tweet(item)
         if not post_tweet(tweet, state):
             break  # a post failure (e.g. session expired) — don't keep trying the rest
