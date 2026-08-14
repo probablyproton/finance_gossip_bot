@@ -265,6 +265,46 @@ def fetch_topic_news(query: str, max_items: int = 15) -> list[dict]:
     return _fetch_google_news_rss(query, max_items, log_label=f"topic:{query[:40]}...")
 
 
+# Confirmed live: Google News RSS indexes individual X/Twitter posts when searched with
+# site:x.com, and returns the REAL TWEET TEXT as the item's <title> (e.g. resolved a genuine
+# Justin Sun tweet about a lawsuit, and a real "feud between Sam Altman and Elon Musk" tweet).
+# This finds quote-tweet candidates without touching X's own search/API at all — reuses the
+# exact same Google News mechanism already proven for articles, just a different query shape.
+_TWEET_PERMALINK_RE = re.compile(r"(?:x\.com|twitter\.com)/(\w+)/status/(\d+)")
+
+
+def fetch_tweet_candidates(name: str, max_items: int = 15) -> list[dict]:
+    """Google News RSS search for a named individual's own tweets or tweets about them."""
+    return _fetch_google_news_rss(f"site:x.com {name}", max_items, log_label=f"tweets:{name}")
+
+
+def fetch_tweet_author_name(tweet_url: str) -> str:
+    """X's public oEmbed endpoint (the same one any website uses to embed a tweet) returns
+    the author's real display name — e.g. 'H.E. Justin Sun 👨‍🚀 🌞' for @justinsuntron.
+    Documented, public, no scraping and no API key. Used to tell 'this IS the titan's own
+    tweet' apart from 'someone else gossiping about them' — only the latter is what we
+    actually want to quote-tweet. Returns '' on any failure."""
+    if not tweet_url:
+        return ""
+    try:
+        resp = requests.get("https://publish.twitter.com/oembed",
+                             params={"url": tweet_url}, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        return resp.json().get("author_name", "")
+    except Exception as e:
+        log.warning("oEmbed author lookup failed for %s: %s", tweet_url, e)
+        return ""
+
+
+def _is_self_authored(person_name: str, author_name: str) -> bool:
+    """True only if EVERY word in the titan's name appears in the tweet author's display
+    name — a partial/coincidental match (just "Justin") isn't enough evidence to exclude a
+    genuinely different person's tweet."""
+    person_words = set(re.findall(r"[a-z]+", person_name.lower()))
+    author_words = set(re.findall(r"[a-z]+", author_name.lower()))
+    return bool(person_words) and person_words.issubset(author_words)
+
+
 def load_state() -> dict:
     if os.path.exists(STATE_FILE):
         try:
@@ -329,6 +369,30 @@ def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
         for a in fetch_topic_news(query):
             if _passes_gossip_filters(a, cutoff, seen):
                 candidates.append({**a, "person": "industry-wide", "fingerprint": _dedup_key(a)})
+
+    for name in TITANS_WATCHLIST:
+        for a in fetch_tweet_candidates(name):
+            if not a.get("published") or a["published"] < cutoff:
+                continue
+            if not _is_gossip_worthy(a["headline"]):
+                continue
+            # Cheap text filter passed -- now pay for resolve + oEmbed, only for candidates
+            # that already look promising.
+            resolved = _resolve_google_news_url(a.get("link") or "")
+            m = _TWEET_PERMALINK_RE.search(resolved)
+            if not m:
+                continue  # not a genuine tweet permalink (a profile/search page, etc.)
+            author_name = fetch_tweet_author_name(resolved)
+            if _is_self_authored(name, author_name):
+                continue  # this is the titan's OWN tweet -- we want others' gossip about them
+            fp = resolved.strip().lower()
+            if fp in seen:
+                continue
+            candidates.append({
+                "headline": a["headline"], "link": resolved,
+                "source": author_name or "a tweet", "published": a["published"],
+                "person": name, "fingerprint": fp, "is_tweet": True,
+            })
 
     if not candidates:
         return []
@@ -457,6 +521,14 @@ def post_tweet(text: str, state: dict) -> bool:
                    "truncate this itself, which is likely what caused the mid-word cutoff "
                    "seen before): %r", effective_len, text[:80])
         return False
+    # Defense in depth: never post a raw Google News redirect link (a Google interstitial,
+    # not the real source) — run_cycle already skips an item whose link failed to resolve,
+    # but this guards the posting function itself against any other path that might
+    # construct a tweet with an unresolved link.
+    if "news.google.com" in text:
+        log.error("Refusing to post — text contains an unresolved Google News link instead "
+                   "of the real source: %r", text[:80])
+        return False
     if DRY_RUN:
         log.info("[DRY RUN] Would post:\n%s", text)
         return True
@@ -481,6 +553,35 @@ def post_tweet(text: str, state: dict) -> bool:
         return False
 
 
+def post_quote_tweet(tweet_url: str, state: dict) -> bool:
+    """Quote-tweets a genuine, already-public tweet via X's own documented intent URL
+    (x.com/intent/tweet?url=...) — this is X's officially supported sharing flow, not
+    scraping. No added commentary text — the quoted tweet (someone else's real reaction/
+    gossip about a titan, never their own tweet, see _is_self_authored) speaks for itself,
+    same 'aggregate, never fabricate' discipline as every other post this bot makes."""
+    if DRY_RUN:
+        log.info("[DRY RUN] Would quote-tweet: %s", tweet_url)
+        return True
+    if not os.path.exists(SESSION_FILE):
+        log.error("No %s found — run login.py first to create one.", SESSION_FILE)
+        return False
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(storage_state=SESSION_FILE)
+            page = context.new_page()
+            page.goto(f"https://x.com/intent/tweet?url={quote(tweet_url, safe='')}")
+            page.wait_for_selector('[data-testid="tweetButton"]', timeout=15000)
+            page.click('[data-testid="tweetButton"]')
+            page.wait_for_timeout(3000)
+            browser.close()
+        log.info("Quote-tweeted: %s", tweet_url)
+        return True
+    except Exception as e:
+        log.error("Quote-tweet failed: %s", e)
+        return False
+
+
 def run_cycle():
     state = load_state()
     items = find_gossip_items(state, max_items=MAX_POSTS_PER_CYCLE)
@@ -490,14 +591,29 @@ def run_cycle():
 
     posted = 0
     for i, item in enumerate(items):
-        # Only resolve the links of items actually being posted, not every candidate scanned
-        # — each resolution is an extra request to Google's redirect-decode endpoint.
-        item["link"] = _resolve_google_news_url(item.get("link", ""))
-        # Same principle for the context fetch — it's what makes clicking the link
-        # unnecessary, but only worth the extra request for items actually being posted.
-        item["context"] = fetch_article_context(item["link"])
-        tweet = generate_tweet(item)
-        if not post_tweet(tweet, state):
+        if item.get("is_tweet"):
+            # Already resolved to a genuine tweet permalink during discovery — no article
+            # context concept applies here, we're quoting the tweet itself, not summarizing it.
+            ok = post_quote_tweet(item["link"], state)
+        else:
+            # Only resolve the links of items actually being posted, not every candidate
+            # scanned — each resolution is an extra request to Google's redirect-decode
+            # endpoint.
+            item["link"] = _resolve_google_news_url(item.get("link", ""))
+            if "news.google.com" in item["link"]:
+                # _resolve_google_news_url falls back to the original (unresolved) redirect
+                # link on any failure, by design, so a transient failure never blocks a post.
+                # But posting that raw Google URL instead of the real source is exactly what
+                # must never happen — skip just this one item and try the next candidate,
+                # rather than aborting the whole cycle over a single resolution failure.
+                log.warning("Skipping (Google News link failed to resolve to a real source "
+                            "URL): %s", item["headline"][:70])
+                continue
+            # Same principle for the context fetch — it's what makes clicking the link
+            # unnecessary, but only worth the extra request for items actually being posted.
+            item["context"] = fetch_article_context(item["link"])
+            ok = post_tweet(generate_tweet(item), state)
+        if not ok:
             break  # a post failure (e.g. session expired) — don't keep trying the rest
         posted += 1
         if not DRY_RUN:

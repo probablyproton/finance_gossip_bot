@@ -72,20 +72,31 @@ jobs:
           # NEVER use `git push --force` here. It previously destroyed a real code commit
           # ("Add real article context...") that landed on origin between this job's checkout
           # and this step running -- the force push overwrote origin's tip with a branch based
-          # on this job's now-stale checkout, silently discarding that commit. Confirmed via
-          # `git log`: the resulting state commit's parent was the OLD tip, not the one that
-          # commit had already been pushed on top of.
+          # on this job's now-stale checkout, silently discarding that commit.
           #
-          # Fix: re-fetch + soft-reset to the CURRENT origin/main tip immediately before
-          # committing, every retry attempt -- this guarantees our state commit's parent is
-          # always whatever is actually on origin at push time, so a normal (non-force) push
-          # is always a clean fast-forward that can never clobber another commit.
+          # A follow-up fix using `git reset --soft origin/main` was ALSO wrong, just in a
+          # subtler way: --soft only moves HEAD -- it does NOT update the index or working
+          # tree. So the index still held whatever gossip_bot.py/DESIGN.md looked like at
+          # THIS job's original (possibly stale) checkout, and the resulting commit silently
+          # reverted real code back to that stale version while still saving the new
+          # state.json. Confirmed live: two later feature commits got reverted and restored
+          # repeatedly (state: 10:22 reverted 115 lines, state: 10:26 restored them, state:
+          # 10:27 reverted them again) as different runs with different-aged checkouts each
+          # took their turn silently stomping the code.
+          #
+          # Actual fix: `git reset --hard origin/main` to make BOTH the index AND the working
+          # tree exactly match the current true origin content (eliminating any stale-file
+          # risk entirely), then restore ONLY the bot's freshly-written state.json on top
+          # (saved to a path outside the repo first, since --hard would otherwise overwrite
+          # it back to origin's old version too) before committing.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          cp state.json /tmp/new_state.json
           for i in 1 2 3; do
             git fetch origin main
-            git reset --soft origin/main
+            git reset --hard origin/main
+            cp /tmp/new_state.json state.json
             git add state.json
             if git diff --staged --quiet; then
               echo "No state changes to commit."

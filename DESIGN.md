@@ -100,6 +100,31 @@ A topic-search hit is tagged `person: "industry-wide"` rather than a specific na
 dedup keys off the article's link rather than a name+headline pair, since a topic hit has no
 pre-known person to key off of.
 
+### Quote-tweets — a third content type, for exposure
+
+Alongside articles, the bot also finds genuine, already-public tweets to quote-tweet
+(`fetch_tweet_candidates`, `post_quote_tweet`). Two things make this ToS-safe rather than
+scraping X directly:
+
+1. **Discovery** — confirmed live that Google News RSS indexes individual X posts when
+   searched `site:x.com {name}`, returning the REAL tweet text as the item title (verified:
+   a genuine Justin Sun tweet about his lawsuit, a real "feud between Sam Altman and Elon
+   Musk" tweet). Same Google News mechanism already used for articles, just a different
+   query shape — no X search/API touched at all.
+2. **Author verification** — X's public oEmbed endpoint (`publish.twitter.com/oembed`, the
+   same one any website uses to embed a tweet) returns the real author display name. This is
+   what enforces the actual requirement (per explicit instruction): **never quote-tweet a
+   titan's own words** — only genuine gossip/commentary from someone else about them.
+   `_is_self_authored` requires every word of the titan's name to appear in the tweet
+   author's display name before excluding it (confirmed: correctly excludes "H.E. Justin Sun
+   👨‍🚀 🌞" for @justinsuntron, would not exclude an unrelated account).
+
+Posting itself uses X's own documented `x.com/intent/tweet?url=...` sharing flow — the
+platform's own officially-supported mechanism for quote-tweeting a URL, not automation
+scraping X's search or timelines. No added commentary text in v1 — the quoted tweet (someone
+else's real reaction) speaks for itself, same "aggregate, never fabricate" discipline as
+every other post.
+
 ## Cadence and multi-post
 
 `bot.yml` deliberately has NO `schedule:` trigger — GitHub Actions' own native cron proved
