@@ -385,7 +385,13 @@ def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
             author_name = fetch_tweet_author_name(resolved)
             if _is_self_authored(name, author_name):
                 continue  # this is the titan's OWN tweet -- we want others' gossip about them
-            fp = resolved.strip().lower()
+            # The tweet's numeric status ID, not the full URL string -- confirmed live this
+            # was the actual dedup bug: the SAME tweet got quote-tweeted 3 times, because
+            # Google's resolution isn't guaranteed to return byte-identical URLs across
+            # different searches for the same tweet (domain variant, tracking params, etc.),
+            # so a raw-URL fingerprint silently failed to match. A tweet's status ID is
+            # permanent and unique regardless of domain/username/query-string variation.
+            fp = f"tweet:{m.group(2)}"
             if fp in seen:
                 continue
             candidates.append({
@@ -553,14 +559,30 @@ def post_tweet(text: str, state: dict) -> bool:
         return False
 
 
+# Confirmed live this was a real problem, not just theoretical: a quote-tweet posted with
+# no added text at all reads as a bare, contentless repost (worse when the quoted tweet is
+# itself just an image) — not a fabricated claim, just a short reaction cue, never a
+# restatement/summary of the quoted tweet's actual content.
+QUOTE_TWEET_OPENERS = [
+    "Spotted this:",
+    "Well, this is a lot:",
+    "This just happened:",
+    "Worth a look:",
+    "Some tea:",
+    "This is wild:",
+]
+
+
 def post_quote_tweet(tweet_url: str, state: dict) -> bool:
     """Quote-tweets a genuine, already-public tweet via X's own documented intent URL
     (x.com/intent/tweet?url=...) — this is X's officially supported sharing flow, not
-    scraping. No added commentary text — the quoted tweet (someone else's real reaction/
-    gossip about a titan, never their own tweet, see _is_self_authored) speaks for itself,
-    same 'aggregate, never fabricate' discipline as every other post this bot makes."""
+    scraping. Adds a short, neutral reaction opener (never a summary/restatement of the
+    quoted tweet's own content) so the post never reads as a bare, textless repost — the
+    quoted tweet (someone else's real reaction/gossip about a titan, never their own tweet,
+    see _is_self_authored) still carries all the actual substance."""
+    opener = random.choice(QUOTE_TWEET_OPENERS)
     if DRY_RUN:
-        log.info("[DRY RUN] Would quote-tweet: %s", tweet_url)
+        log.info("[DRY RUN] Would quote-tweet %r + %s", opener, tweet_url)
         return True
     if not os.path.exists(SESSION_FILE):
         log.error("No %s found — run login.py first to create one.", SESSION_FILE)
@@ -570,12 +592,17 @@ def post_quote_tweet(tweet_url: str, state: dict) -> bool:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(storage_state=SESSION_FILE)
             page = context.new_page()
-            page.goto(f"https://x.com/intent/tweet?url={quote(tweet_url, safe='')}")
-            page.wait_for_selector('[data-testid="tweetButton"]', timeout=15000)
+            intent_url = (f"https://x.com/intent/tweet?url={quote(tweet_url, safe='')}"
+                          f"&text={quote(opener, safe='')}")
+            page.goto(intent_url)
+            page.wait_for_selector('[data-testid="tweetTextarea_0"]', timeout=15000)
+            # Explicitly (re-)fill rather than trusting the URL param alone to have
+            # prefilled it — cheap insurance, harmless if it was already there.
+            page.fill('[data-testid="tweetTextarea_0"]', opener)
             page.click('[data-testid="tweetButton"]')
             page.wait_for_timeout(3000)
             browser.close()
-        log.info("Quote-tweeted: %s", tweet_url)
+        log.info("Quote-tweeted (%r): %s", opener, tweet_url)
         return True
     except Exception as e:
         log.error("Quote-tweet failed: %s", e)
