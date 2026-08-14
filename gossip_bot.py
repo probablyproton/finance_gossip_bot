@@ -348,9 +348,30 @@ def generate_tweet(item: dict) -> str:
     return text
 
 
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _effective_tweet_length(text: str) -> int:
+    """X counts any URL as a fixed 23 characters (t.co shortening) regardless of its real
+    length — this substitutes every URL with a 23-char placeholder before counting, so the
+    result matches what X itself would count against the 280 limit."""
+    return len(_URL_RE.sub("x" * 23, text))
+
+
 def post_tweet(text: str, state: dict) -> bool:
     """Playwright-based posting via a saved session cookie — same mechanism as the ticker
     bot, pointed at this account's own session file."""
+    # Defense in depth: verify the ACTUAL effective length right before posting, not just
+    # trust generate_tweet's own budget math. A deleted real tweet was found cut off
+    # mid-word with no trailing "…" — a shape neither version of generate_tweet's own
+    # truncation should produce — so something in this pipeline can still generate an
+    # over-budget tweet; this catches that instead of silently posting a broken one.
+    effective_len = _effective_tweet_length(text)
+    if effective_len > 280:
+        log.error("Refusing to post — effective length %d exceeds 280 (X would silently "
+                   "truncate this itself, which is likely what caused the mid-word cutoff "
+                   "seen before): %r", effective_len, text[:80])
+        return False
     if DRY_RUN:
         log.info("[DRY RUN] Would post:\n%s", text)
         return True
