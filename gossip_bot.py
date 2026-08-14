@@ -394,8 +394,13 @@ def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
             fp = f"tweet:{m.group(2)}"
             if fp in seen:
                 continue
+            # Canonical status URL, not the raw resolved string -- confirmed live that a
+            # resolved URL can carry a trailing /photo/1 (or similar media-view suffix),
+            # which makes X's quote-tweet embed jump straight to the photo lightbox and
+            # render with no text/source card at all, just the bare image.
+            canonical_url = f"https://x.com/{m.group(1)}/status/{m.group(2)}"
             candidates.append({
-                "headline": a["headline"], "link": resolved,
+                "headline": a["headline"], "link": canonical_url,
                 "source": author_name or "a tweet", "published": a["published"],
                 "person": name, "fingerprint": fp, "is_tweet": True,
             })
