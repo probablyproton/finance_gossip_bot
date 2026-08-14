@@ -507,7 +507,24 @@ def generate_tweet(item: dict) -> str:
 
     body = context if context else headline
     if len(body) > max_len:
-        body = body[:max_len].rsplit(" ", 1)[0] + "…"
+        # Cut at the last whole sentence that fits, not just the last whole word -- a
+        # word-boundary-only cut can (and did, confirmed live) stop partway through a
+        # sentence's own thought, e.g. "...media smear campaign against World Liberty
+        # Financial…" trailing off mid-clause. _split_sentences already broke this text into
+        # "\n\n"-joined sentences above, so reuse that structure instead of re-splitting.
+        sentences = body.split("\n\n")
+        kept, total = [], 0
+        for s in sentences:
+            added = len(s) + (2 if kept else 0)  # account for the "\n\n" joiner
+            if total + added > max_len:
+                break
+            kept.append(s)
+            total += added
+        if kept:
+            body = "\n\n".join(kept) + "…"
+        else:
+            # Even the first sentence alone doesn't fit -- fall back to a word-boundary cut.
+            body = body[:max_len].rsplit(" ", 1)[0] + "…"
 
     text = body
     if link:
