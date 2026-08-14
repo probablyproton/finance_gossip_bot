@@ -100,12 +100,31 @@ pre-known person to key off of.
 
 ## Cadence and multi-post
 
-Runs on GitHub Actions' own native cron (`schedule: - cron: "*/15 * * * *"` in `bot.yml`) —
-no external dispatcher needed, unlike the ticker bot's model. Each cycle can post up to
-`MAX_POSTS_PER_CYCLE` (default 3) distinct stories in one run, found from a single fetch pass
-(not by re-fetching per post), with a `POST_PACING_SECONDS` gap (default 45s) between
-successive posts in the same cycle so they don't land seconds apart. A manual
-`workflow_dispatch` run still has the dry-run checkbox; a scheduled cron run always runs live.
+`bot.yml` deliberately has NO `schedule:` trigger — GitHub Actions' own native cron proved
+unreliable at a 15min cadence for the ticker bot too (delayed/skipped runs), so this instead
+uses an external **cron-job.org** job that calls the `workflow_dispatch` REST API endpoint
+every 15 minutes, same pattern as the ticker bot (which has its own separate cron-job.org job
+— do not repoint that one; this bot needs its own).
+
+**cron-job.org job configuration** (a NEW job, separate from the ticker bot's):
+- URL: `https://api.github.com/repos/probablyproton/finance_gossip_bot/actions/workflows/bot.yml/dispatches`
+- Method: `POST`
+- Headers:
+  - `Authorization: Bearer <a GitHub Personal Access Token — fine-grained, scoped to just
+    this repo, with "Actions: Read and write" permission>`
+  - `Accept: application/vnd.github+json`
+  - `Content-Type: application/json`
+- Request body: `{"ref": "main", "inputs": {"dry_run": false}}`
+- Schedule: every 15 minutes
+
+The `dry_run: false` in the body is load-bearing, not optional — the workflow's `dry_run`
+input defaults to `true` (so a human casually clicking "Run workflow" in the GitHub UI gets a
+safe preview by default), and since every trigger is now `workflow_dispatch`, an external call
+that omits `inputs.dry_run` silently falls back to that same default and never actually posts.
+
+Each cycle can post up to `MAX_POSTS_PER_CYCLE` (default 3) distinct stories in one run, found
+from a single fetch pass (not by re-fetching per post), with a `POST_PACING_SECONDS` gap
+(default 45s) between successive posts in the same cycle so they don't land seconds apart.
 
 Cross-candidate dedup uses a real word-overlap similarity check (`_headline_similarity`,
 threshold 0.5), not exact-string matching — confirmed live that the same story routinely

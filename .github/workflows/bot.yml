@@ -7,11 +7,9 @@ on:
         description: "Dry run (log what it would post, don't actually post)"
         type: boolean
         default: true
-  schedule:
-    # GitHub Actions' own native cron -- no external dispatcher needed (unlike the ticker
-    # bot's model). UTC only; GitHub can delay a scheduled run during high load, and disables
-    # schedules entirely on a repo with 60+ days of no activity -- neither is a concern yet.
-    - cron: "*/15 * * * *"
+  # No schedule: trigger here on purpose -- GitHub's native cron proved unreliable for the
+  # ticker bot at a 15min cadence too. An external cron-job.org job calls the
+  # workflow_dispatch REST API endpoint on a schedule instead (see DESIGN.md).
 
 concurrency:
   group: gossip-bot
@@ -55,10 +53,11 @@ jobs:
           echo "TITANS_WATCHLIST=${{ vars.TITANS_WATCHLIST }}" >> my.env
           echo "NEWS_FRESHNESS_HOURS=48" >> my.env
           echo "GOSSIP_SEEN_MEMORY_DAYS=14" >> my.env
-          # inputs.* only exists for a manual workflow_dispatch run -- a scheduled (cron) run
-          # has no "inputs" context at all, so it must default to live (false) explicitly,
-          # not fall through to an empty/blank value.
-          echo "DRY_RUN=${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}" >> my.env
+          # Every trigger is workflow_dispatch now (no schedule: trigger) -- but that means
+          # the external cron-job.org call MUST explicitly pass inputs.dry_run=false in its
+          # POST body, or this silently falls back to the checkbox's default (true) and never
+          # actually posts. See DESIGN.md for the exact cron-job.org request configuration.
+          echo "DRY_RUN=${{ inputs.dry_run }}" >> my.env
           echo "MAX_POSTS_PER_CYCLE=3" >> my.env
 
       - name: Decode Twitter session
