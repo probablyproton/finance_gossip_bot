@@ -55,11 +55,18 @@ SESSION_FILE = "twitter_session.json"
 # Positive filter: the headline itself has to signal drama/conflict/business intrigue —
 # this is the opposite of the ticker bot's "reject clickbait" filter, since here the spicy
 # framing IS the content. Still requires a real published article behind it.
+# Trimmed after confirmed false positives spammed the feed with routine business news that
+# happened to contain a weak signal word attached to a titan's name: "resigns"/"steps down"
+# fire on ordinary planned departures, "split" fires on stock-split announcements (these ARE
+# CEOs of public companies, so that's a frequent hit), "leaked"/"secret" fire on generic
+# product-leak headlines, "controversy"/"apology"/"criticizes" fire on any policy/PR story.
+# Kept only words that specifically signal interpersonal conflict/drama, not routine business
+# events or general criticism of a decision.
 GOSSIP_SIGNAL_RE = re.compile(
-    r"\b(feud|lawsuit|sues?|sued|fired|resigns?|steps?\s+down|ousted|slams?|blasts?|"
-    r"backlash|scandal|divorce|split(?:s|ting)?|rivalry|clash(?:es)?|criticiz\w+|accus\w+|"
-    r"drama|shake-?up|secret|leaked?|expos(?:e|es|ed)|rift|fallout|controvers\w+|apolog\w+|"
-    r"blow-?up|meltdown|showdown|spat|snub(?:s|bed)?|brawl|blast(?:s|ed)?)\b",
+    r"\b(feud|lawsuit|sues?|sued|fired|ousted|slams?|blasts?(?:ed)?|"
+    r"scandal|divorce|rivalry|clash(?:es)?|accus\w+|"
+    r"drama|shake-?up|expos(?:e|es|ed)|rift|fallout|"
+    r"blow-?up|meltdown|showdown|spat|snub(?:s|bed)?|brawl)\b",
     re.I,
 )
 
