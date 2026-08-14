@@ -380,8 +380,6 @@ def _clean_headline(headline: str) -> str:
     return _COLUMN_BRAND_PREFIX_RE.sub("", headline).strip()
 
 
-MAX_HEADLINE_LEN_WITH_CONTEXT = 100
-
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 
 
@@ -399,16 +397,21 @@ def _split_sentences(text: str) -> str:
 
 
 def generate_tweet(item: dict) -> str:
-    """Zero-LLM v1 template — never asserts the headline as settled fact, always includes
-    the link so readers can verify it themselves. No explicit "(via X)" attribution line —
-    the link's own domain (and X's link-preview card) already shows the source, so a
-    separate text line just restating it is redundant clutter.
+    """Zero-LLM v1 template — never asserts anything as settled fact, always includes the
+    link so readers can verify it themselves. No explicit "(via X)" attribution line — the
+    link's own domain (and X's link-preview card) already shows the source, so a separate
+    text line just restating it is redundant clutter.
 
-    Headline leads. When item["context"] (the article's own opening paragraph, see
-    fetch_article_context) is available, it's inserted below the headline — the actual
-    substance that makes clicking the link unnecessary. The headline gets capped at
-    MAX_HEADLINE_LEN_WITH_CONTEXT in that case so the context (where the real information
-    lives) gets most of the remaining room, rather than an even split."""
+    When item["context"] (the article's own opening paragraph, see fetch_article_context) is
+    available, it REPLACES the headline entirely rather than sitting alongside it. Real
+    journalistic ledes are self-contained by convention — they name the subject explicitly,
+    never lean on the headline for context (confirmed true in every real example seen: "The
+    wife of a billionaire hedge fund mogul...", "Representative Maxine Waters..."). Keeping
+    the headline as well previously ate ~80+ characters restating scene-setting the context
+    already covers more specifically, which is what caused a real tweet to cut off right
+    before its actual payoff ("...whether his connections to President Donald Trump played a
+    role" got truncated to "...to…"). Falls back to headline-only when no context could be
+    fetched."""
     headline = _split_sentences(_clean_headline(item["headline"]))
     context = _split_sentences(item.get("context") or "")
     link = item.get("link") or ""
@@ -418,20 +421,11 @@ def generate_tweet(item: dict) -> str:
     # whenever the link was a long Google News redirect blob (confirmed live: a real headline
     # got crushed down to "Wife of hedge…").
     link_budget = (2 + 23) if link else 0  # blank line + 23-char shortened link
+    max_len = 280 - link_budget
 
-    if context:
-        max_headline_len = MAX_HEADLINE_LEN_WITH_CONTEXT
-        if len(headline) > max_headline_len:
-            headline = headline[:max_headline_len].rsplit(" ", 1)[0] + "…"
-        max_context_len = 280 - link_budget - len(headline) - 2  # 2 for blank line before context
-        if len(context) > max_context_len:
-            context = context[:max_context_len].rsplit(" ", 1)[0] + "…"
-        body = f"{headline}\n\n{context}"
-    else:
-        max_headline_len = 280 - link_budget
-        if len(headline) > max_headline_len:
-            headline = headline[:max_headline_len].rsplit(" ", 1)[0] + "…"
-        body = headline
+    body = context if context else headline
+    if len(body) > max_len:
+        body = body[:max_len].rsplit(" ", 1)[0] + "…"
 
     text = body
     if link:
