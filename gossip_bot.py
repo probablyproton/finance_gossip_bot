@@ -305,24 +305,47 @@ def _headline_similarity(a: str, b: str) -> float:
     return len(wa & wb) / len(wa | wb)
 
 
+# Recurring column/section branding some trade-press outlets prefix onto EVERY headline in
+# that column, regardless of the actual story ("Morning Coffee: Hedge fund divorce dramas...")
+# — pure noise once lifted out of the column's usual visual context, not real content, so
+# safe to strip (unlike the actual headline text, which per policy we never alter/embellish).
+_COLUMN_BRAND_PREFIX_RE = re.compile(
+    r"^(Morning Coffee|Opening Bell|Lunch Wrap|Afternoon Coffee|Editor'?s Pick)\s*:\s*",
+    re.I,
+)
+
+
+def _clean_headline(headline: str) -> str:
+    return _COLUMN_BRAND_PREFIX_RE.sub("", headline).strip()
+
+
 def generate_tweet(item: dict) -> str:
     """Zero-LLM v1 template — always attributes, never asserts the headline as settled
-    fact, always includes the link so readers can verify it themselves."""
+    fact, always includes the link so readers can verify it themselves.
+
+    Headline leads, attribution trails on its own line — NOT "Word from X: {headline}",
+    which reads as an awkward run-on whenever a headline has its own internal colon/label
+    (confirmed live: "Word from eFinancialCareers: Morning Coffee: Hedge fund divorce
+    dramas..." stacked three labels deep). Leading with the headline avoids that regardless
+    of the headline's own structure, without needing to guess/rewrite its wording."""
     source = item.get("source") or "a recent report"
-    headline = item["headline"]
+    headline = _clean_headline(item["headline"])
     link = item.get("link") or ""
 
-    prefix = f"Word from {source}: "
+    attribution = f"(via {source})"
     # X counts any URL as a fixed ~23 characters (t.co shortening) regardless of its real
     # length. Using the link's raw length here instead severely over-truncated the headline
     # whenever the link was a long Google News redirect blob (confirmed live: a real headline
     # got crushed down to "Wife of hedge…").
-    link_budget = 25 if link else 0  # 2 newlines + 23-char shortened link
-    max_len = 280 - len(prefix) - link_budget
+    link_budget = (2 + 23) if link else 0  # blank line + 23-char shortened link
+    max_len = 280 - len(attribution) - 2 - link_budget  # 2 for the blank line before attribution
     if len(headline) > max_len:
         headline = headline[:max_len].rsplit(" ", 1)[0] + "…"
-    suffix = f"\n\n{link}" if link else ""
-    return prefix + headline + suffix
+
+    text = f"{headline}\n\n{attribution}"
+    if link:
+        text += f"\n\n{link}"
+    return text
 
 
 def post_tweet(text: str, state: dict) -> bool:
