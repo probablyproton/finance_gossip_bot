@@ -47,6 +47,41 @@ not present in the source — applies here even more strictly:
    guidance, and never imply insider-trading-adjacent claims without the source itself
    making that claim.
 
+### Gossip-signal vocabulary — a living list
+
+`GOSSIP_SIGNAL_RE` (the positive keyword filter) and `BUSINESS_OUTCOME_RE` (the negative
+filter that catches business/deal framing even when a gossip word matched) are not a
+finished product — they get tuned every time a real example shows up, either a spam pattern
+that slipped through or a genuine gossip story that got missed. Treat this as a running log,
+not a one-time list; append to it rather than silently rewriting history.
+
+Current categories in `GOSSIP_SIGNAL_RE`: relationship/marriage drama (divorce, affair,
+cheating, breakup, custody, prenup), vices/personal struggles (addiction, rehab, relapse,
+overdose, DUI), legal/criminal-personal (arrest, jail, indictment, assault, harassment),
+family drama (disowned, inheritance/estate battles), interpersonal conflict (feud, rivalry,
+clash, brawl, confrontation), public embarrassment (scandal, exposed, leaked photos/texts,
+caught, spotted with), and career/legal words carried over from the original filter (lawsuit,
+fired, ousted, slams) that stay genuinely ambiguous between personal and professional conflict
+— disambiguated by `BUSINESS_OUTCOME_RE`, not by removing them.
+
+Confirmed learnings so far:
+- Removed (too weak/generic, spammed the feed with routine business news): "resigns"/"steps
+  down" (ordinary planned departures), "split" used alone (stock-split announcements —
+  re-added narrowly as `split(s|ting) (from|with)` for marriage splits only), "leaked"/"secret"
+  used alone (generic product-leak headlines — re-added narrowly as `leaked (photos|texts|...)`
+  for personal-media leaks only), "controversy"/"apology"/"criticizes" (any policy/PR story).
+- Deliberately excluded: bare "fight(s)" — even more common in business/legal/regulatory
+  headlines ("fights the lawsuit", "fights regulators") than the words already removed above;
+  "brawl"/"altercation"/"confrontation" cover the physical-conflict framing instead.
+- Added `BUSINESS_OUTCOME_RE` after "Trump And Musk Have Now Turned Their Bitter Feud Into A
+  $100 Million Alliance" matched on "feud" but was a business/political deal story — the
+  words "feud"/"rivalry"/"clash" are kept because they're valid gossip signals on their own,
+  but rejected when the same headline also frames a deal/alliance/merger/acquisition outcome.
+- Moderate-risk words being watched, not yet removed: "charged" (could mean personally
+  charged with a crime, or a company charged with a regulatory violation — kept for now since
+  per-person search means the headline names the person, not the company, but flag if this
+  spams the feed).
+
 If a story doesn't clear all five, it doesn't get posted — better to post less than to post
 something that reads as a fabricated or exaggerated claim about a real person.
 

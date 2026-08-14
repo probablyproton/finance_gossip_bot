@@ -65,14 +65,41 @@ SESSION_FILE = "twitter_session.json"
 # Expanded with explicit tabloid/personal-life categories per the account's actual mandate
 # (see DESIGN.md): divorce, cheating, addiction, personal fights -- the paparazzi of finance,
 # not a business-news feed with spicier headlines.
+#
+# LIVING LIST -- expand this whenever a real example (missed gossip OR a new false-positive
+# spam pattern) shows up; don't treat this as finished. Grouped by category so new additions
+# land in the right place. See "Gossip-signal vocabulary" in DESIGN.md for the running log of
+# real examples that justified each addition/removal.
+#
+# Deliberately excluded: bare "fight(s)" -- far too common in business/legal/regulatory
+# headlines ("fights the lawsuit", "fights regulators", "fights a takeover bid"), the exact
+# false-positive shape already learned twice over (see "resigns"/"steps down"/"split" above).
+# "brawl"/"altercation"/"confrontation" cover the physical-conflict framing instead, since
+# those almost never appear in a business-deal headline.
 GOSSIP_SIGNAL_RE = re.compile(
-    r"\b(feud|lawsuit|sues?|sued|fired|ousted|slams?|blasts?(?:ed)?|"
-    r"scandal|divorce|divorc\w+|affair|cheat(?:s|ed|ing)?|mistress|infidelit\w+|"
-    r"break-?up|broke\s+up|estranged|custody|prenup|"
-    r"addiction|rehab|relapse[ds]?|overdose[ds]?|arrest(?:ed)?|jail(?:ed)?|indict\w+|"
-    r"rivalry|clash(?:es)?|accus\w+|"
-    r"drama|shake-?up|expos(?:e|es|ed)|rift|fallout|"
-    r"blow-?up|meltdown|showdown|spat|snub(?:s|bed)?|brawl)\b",
+    r"\b("
+    # Relationship / marriage drama
+    r"divorc\w+|affair|cheat(?:s|ed|ing)?|mistress|infidelit\w+|"
+    r"break-?up|broke\s+up|split(?:s|ting)?\s+(?:from|with)|estranged|separat(?:ed|ion)|"
+    r"custody|prenup|alimony|ex-wife|ex-husband|love\s+child|"
+    # Vices / personal struggles
+    r"addiction|rehab|relapse[ds]?|overdose[ds]?|sober(?:riety)?|alcoholi\w+|"
+    r"substance\s+abuse|dui|intervention|breakdown|"
+    # Legal / criminal, personal
+    r"arrest(?:ed)?|jail(?:ed)?|prison|indict\w+|charged|mugshot|subpoena\w*|"
+    r"restraining\s+order|assault(?:ed)?|harass\w+|misconduct|abuse[ds]?|"
+    # Family drama
+    r"disown\w+|inheritance\s+battle|estate\s+battle|will\s+dispute|"
+    # Interpersonal conflict (not "fight" -- see note above)
+    r"feud|rivalry|clash(?:es)?|brawl|blow-?up|meltdown|showdown|spat|"
+    r"snub(?:s|bed)?|confrontation|altercation|"
+    # Public embarrassment / secret exposure
+    r"scandal|drama|expos(?:e|es|ed)|leaked?\s+(?:photos?|texts?|messages?|audio|video)|"
+    r"caught|spotted\s+(?:with|dating)|fling|tryst|hookup|"
+    # Career/legal conflict carried over from before -- still genuinely ambiguous between
+    # personal and professional, disambiguated by BUSINESS_OUTCOME_RE below
+    r"lawsuit|sues?|sued|fired|ousted|slams?|blasts?(?:ed)?|accus\w+|shake-?up|rift|fallout"
+    r")\b",
     re.I,
 )
 
