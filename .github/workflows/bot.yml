@@ -11,7 +11,7 @@ on:
     # GitHub Actions' own native cron -- no external dispatcher needed (unlike the ticker
     # bot's model). UTC only; GitHub can delay a scheduled run during high load, and disables
     # schedules entirely on a repo with 60+ days of no activity -- neither is a concern yet.
-    - cron: "*/30 * * * *"
+    - cron: "*/15 * * * *"
 
 concurrency:
   group: gossip-bot

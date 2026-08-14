@@ -100,7 +100,7 @@ pre-known person to key off of.
 
 ## Cadence and multi-post
 
-Runs on GitHub Actions' own native cron (`schedule: - cron: "*/30 * * * *"` in `bot.yml`) —
+Runs on GitHub Actions' own native cron (`schedule: - cron: "*/15 * * * *"` in `bot.yml`) —
 no external dispatcher needed, unlike the ticker bot's model. Each cycle can post up to
 `MAX_POSTS_PER_CYCLE` (default 3) distinct stories in one run, found from a single fetch pass
 (not by re-fetching per post), with a `POST_PACING_SECONDS` gap (default 45s) between
