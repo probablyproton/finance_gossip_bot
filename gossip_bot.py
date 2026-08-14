@@ -90,6 +90,54 @@ def _is_gossip_worthy(headline: str) -> bool:
     return bool(GOSSIP_SIGNAL_RE.search(headline))
 
 
+_GOOGLE_NEWS_SIG_RE = re.compile(r'data-n-a-sg="([^"]+)"')
+_GOOGLE_NEWS_TS_RE = re.compile(r'data-n-a-ts="([^"]+)"')
+
+
+def _resolve_google_news_url(link: str) -> str:
+    """Google News RSS links are a redirect wrapper, not the real article — readers who
+    click through land on a Google interstitial rather than the actual publisher. Decodes
+    it to the real destination via Google's internal batchexecute endpoint (the same call
+    the News web UI itself makes to resolve the redirect). Ported from the ticker bot,
+    re-verified live against a real redirect URL before shipping.
+
+    Unofficial/reverse-engineered — Google has changed this encoding before and could
+    again. Any failure just falls back to the original link rather than blocking the post."""
+    if not link or "news.google.com" not in link:
+        return link
+    try:
+        from urllib.parse import urlparse
+        article_id = urlparse(link).path.rsplit("/", 1)[-1]
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(link, timeout=10, verify=False, headers=headers,
+                             cookies={"SOCS": "CAISHAgBEhJnd3NfMjAyNDAxMDEtMF9SQzIaAmVuIAEaBgiA_LyuBg"})
+        resp.raise_for_status()
+        sig = _GOOGLE_NEWS_SIG_RE.search(resp.text)
+        ts = _GOOGLE_NEWS_TS_RE.search(resp.text)
+        if not sig or not ts:
+            return link
+
+        inner = json.dumps(["garturlreq", [
+            ["en-US", "US", ["FINANCE_TOP_INDICES", "GENESIS_PUBLISHER_SECTION", "WEB_TEST_1_0_0"],
+             None, None, 1, 1, "US:en", None, 180, None, None, None, None, None, 0, None, None,
+             [1608992183, 723341000]],
+            "en-US", "US", 1, [2, 3, 4, 8], 1, 0, "655000234", 0, 0, None, 0],
+            article_id, int(ts.group(1)), sig.group(1)])
+        payload = {"f.req": json.dumps([[["Fbv4je", inner, None, "generic"]]])}
+        resp2 = requests.post("https://news.google.com/_/DotsSplashUi/data/batchexecute",
+                               headers={**headers, "content-type": "application/x-www-form-urlencoded;charset=UTF-8"},
+                               data=payload, timeout=10, verify=False)
+        resp2.raise_for_status()
+        body = resp2.text.split("\n", 1)[-1]
+        outer = json.loads(body)
+        inner_result = json.loads(outer[0][2])
+        resolved = inner_result[1]
+        return resolved if isinstance(resolved, str) and resolved.startswith("http") else link
+    except Exception as e:
+        log.warning("Google News URL resolve failed, keeping original link: %s", e)
+        return link
+
+
 def _fetch_google_news_rss(query: str, max_items: int, log_label: str) -> list[dict]:
     """Google News RSS search for an arbitrary query string — shared by both the per-person
     watchlist search and the industry-wide topic search below."""
@@ -229,13 +277,18 @@ def generate_tweet(item: dict) -> str:
     fact, always includes the link so readers can verify it themselves."""
     source = item.get("source") or "a recent report"
     headline = item["headline"]
-    link = item["link"]
+    link = item.get("link") or ""
 
     prefix = f"Word from {source}: "
-    suffix = f"\n\n{link}"
-    max_len = 280 - len(prefix) - len(suffix)
+    # X counts any URL as a fixed ~23 characters (t.co shortening) regardless of its real
+    # length. Using the link's raw length here instead severely over-truncated the headline
+    # whenever the link was a long Google News redirect blob (confirmed live: a real headline
+    # got crushed down to "Wife of hedge…").
+    link_budget = 25 if link else 0  # 2 newlines + 23-char shortened link
+    max_len = 280 - len(prefix) - link_budget
     if len(headline) > max_len:
         headline = headline[:max_len].rsplit(" ", 1)[0] + "…"
+    suffix = f"\n\n{link}" if link else ""
     return prefix + headline + suffix
 
 
@@ -273,8 +326,16 @@ def run_cycle():
         log.info("No fresh, gossip-worthy, unused story found this cycle.")
         return
 
+    # Only resolve the single winning item's link, not every candidate — this hits
+    # Google's redirect-decode endpoint, an extra request worth paying for once, not once
+    # per candidate scanned.
+    item["link"] = _resolve_google_news_url(item.get("link", ""))
+
     tweet = generate_tweet(item)
-    if post_tweet(tweet, state):
+    if post_tweet(tweet, state) and not DRY_RUN:
+        # Only mark the story seen (and persist state) on a real post — a dry run must have
+        # zero lasting effect, or the item it just previewed would be silently blocked from
+        # actually being posted on the next real run.
         state.setdefault("gossip_seen", {})[item["fingerprint"]] = today()
         save_state(state)
 
