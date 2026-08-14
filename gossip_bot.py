@@ -592,12 +592,14 @@ def post_quote_tweet(tweet_url: str, state: dict) -> bool:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(storage_state=SESSION_FILE)
             page = context.new_page()
-            intent_url = (f"https://x.com/intent/tweet?url={quote(tweet_url, safe='')}"
-                          f"&text={quote(opener, safe='')}")
+            # Deliberately no &text= param here -- confirmed live that passing it AND
+            # filling the textarea ourselves double-writes the opener ("Worth a look: ...
+            # Worth a look:"), because .fill() on X's contenteditable compose box doesn't
+            # reliably clear content the URL param already prefilled. One write, one source
+            # of truth.
+            intent_url = f"https://x.com/intent/tweet?url={quote(tweet_url, safe='')}"
             page.goto(intent_url)
             page.wait_for_selector('[data-testid="tweetTextarea_0"]', timeout=15000)
-            # Explicitly (re-)fill rather than trusting the URL param alone to have
-            # prefilled it — cheap insurance, harmless if it was already there.
             page.fill('[data-testid="tweetTextarea_0"]', opener)
             page.click('[data-testid="tweetButton"]')
             page.wait_for_timeout(3000)
