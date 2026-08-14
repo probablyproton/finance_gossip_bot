@@ -2,6 +2,11 @@ name: Gossip Bot
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log what it would post, don't actually post)"
+        type: boolean
+        default: true
 
 concurrency:
   group: gossip-bot
@@ -45,7 +50,7 @@ jobs:
           echo "TITANS_WATCHLIST=${{ vars.TITANS_WATCHLIST }}" >> my.env
           echo "NEWS_FRESHNESS_HOURS=48" >> my.env
           echo "GOSSIP_SEEN_MEMORY_DAYS=14" >> my.env
-          echo "DRY_RUN=false" >> my.env
+          echo "DRY_RUN=${{ inputs.dry_run }}" >> my.env
 
       - name: Decode Twitter session
         run: echo "${{ secrets.TWITTER_SESSION }}" | base64 -d > twitter_session.json
