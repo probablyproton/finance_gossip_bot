@@ -57,12 +57,13 @@ not a one-time list; append to it rather than silently rewriting history.
 
 Current categories in `GOSSIP_SIGNAL_RE`: relationship/marriage drama (divorce, affair,
 cheating, breakup, custody, prenup), vices/personal struggles (addiction, rehab, relapse,
-overdose, DUI), legal/criminal-personal (arrest, jail, indictment, assault, harassment),
-family drama (disowned, inheritance/estate battles), interpersonal conflict (feud, rivalry,
-clash, brawl, confrontation), public embarrassment (scandal, exposed, leaked photos/texts,
-caught, spotted with), and career/legal words carried over from the original filter (lawsuit,
-fired, ousted, slams) that stay genuinely ambiguous between personal and professional conflict
-— disambiguated by `BUSINESS_OUTCOME_RE`, not by removing them.
+overdose, DUI), legal/criminal-personal (arrest, jail, indictment, assault, harassment,
+fined), family drama (disowned, inheritance/estate battles), interpersonal conflict (feud,
+rivalry, clash, brawl, confrontation, shouting/screaming match, fistfight), public
+embarrassment/oddity (scandal, bizarre, exposed, leaked photos/texts, caught, spotted with),
+and career/legal words carried over from the original filter (lawsuit, fired, ousted, slams)
+that stay genuinely ambiguous between personal and professional conflict — disambiguated by
+`ROUTINE_BUSINESS_RE` (renamed from `BUSINESS_OUTCOME_RE`), not by removing them.
 
 Confirmed learnings so far:
 - Removed (too weak/generic, spammed the feed with routine business news): "resigns"/"steps
@@ -72,11 +73,18 @@ Confirmed learnings so far:
   for personal-media leaks only), "controversy"/"apology"/"criticizes" (any policy/PR story).
 - Deliberately excluded: bare "fight(s)" — even more common in business/legal/regulatory
   headlines ("fights the lawsuit", "fights regulators") than the words already removed above;
-  "brawl"/"altercation"/"confrontation" cover the physical-conflict framing instead.
-- Added `BUSINESS_OUTCOME_RE` after "Trump And Musk Have Now Turned Their Bitter Feud Into A
-  $100 Million Alliance" matched on "feud" but was a business/political deal story — the
-  words "feud"/"rivalry"/"clash" are kept because they're valid gossip signals on their own,
-  but rejected when the same headline also frames a deal/alliance/merger/acquisition outcome.
+  "brawl"/"altercation"/"confrontation"/"shouting match"/"screaming match"/"fistfight" cover
+  the physical-conflict framing instead, since those essentially never appear in a
+  business-deal headline.
+- Added (then renamed/broadened) `ROUTINE_BUSINESS_RE` after "Trump And Musk Have Now Turned
+  Their Bitter Feud Into A $100 Million Alliance" matched on "feud" but was a business/
+  political deal story — the words "feud"/"rivalry"/"clash"/"lawsuit"/"fired" are kept
+  because they're valid gossip signals on their own, but rejected when the same headline also
+  reports a deal/alliance/merger outcome, an earnings/revenue figure, a stock-price move, or
+  routine regulatory/monetary-policy language (tariffs, rate hikes, antitrust) — a genuine
+  personal-drama headline essentially never shares a sentence with those.
+- Added "fined" (personal court/regulatory fine) and "bizarre" (the "weird things" category)
+  per explicit request; both verified against synthetic test headlines before shipping.
 - Moderate-risk words being watched, not yet removed: "charged" (could mean personally
   charged with a crime, or a company charged with a regulatory violation — kept for now since
   per-person search means the headline names the person, not the company, but flag if this
@@ -141,6 +149,29 @@ A topic-search hit is tagged `person: "industry-wide"` rather than a specific na
 dedup keys off the article's link rather than a name+headline pair, since a topic hit has no
 pre-known person to key off of.
 
+### Cross-cycle, cross-medium dedup — the same story, only ever once
+
+The exact-fingerprint dedup (an article's link, a tweet's status ID) only catches an EXACT
+repeat of the same specific link/tweet. It cannot catch "the same underlying story, found
+again later via a different link, a different search query, or as a tweet instead of an
+article" — those never share a fingerprint with each other even though they're the same
+news. Confirmed by direct test: a real article headline and the tweet reporting the same
+story score only 0.44-0.48 on the plain word-overlap (Jaccard) check already used for
+within-cycle near-duplicates — under that check's own 0.5 threshold — because the tweet's
+phrasing is longer and looser than the terse headline.
+
+So `state["posted_signatures"]` persists a `{headline, person, date}` entry for every real
+post (pruned the same way as `gossip_seen`), and every new candidate is checked against ALL
+of them via `_story_already_covered` before it's even considered, using a **containment**
+score (shared-words ÷ the SMALLER headline's word count, not the union) instead of Jaccard --
+robust to the length/style mismatch between a headline and a tweet. Containment alone is too
+permissive on its own, though: confirmed by direct test that two DIFFERENT titans' similarly-
+phrased divorce headlines also score ~0.7 on containment. The fix is a person-name anchor —
+a loose threshold (0.6) when both sides name the SAME specific titan (safe to be generous),
+and a much stricter threshold (0.85) when the person is unknown on either side (an
+industry-wide hit, or a name mismatch), so two different people's similar-shaped stories
+don't get wrongly treated as the same one.
+
 ### Quote-tweets — a third content type, for exposure
 
 Alongside articles, the bot also finds genuine, already-public tweets to quote-tweet
@@ -162,9 +193,29 @@ scraping X directly:
 
 Posting itself uses X's own documented `x.com/intent/tweet?url=...` sharing flow — the
 platform's own officially-supported mechanism for quote-tweeting a URL, not automation
-scraping X's search or timelines. No added commentary text in v1 — the quoted tweet (someone
-else's real reaction) speaks for itself, same "aggregate, never fabricate" discipline as
-every other post.
+scraping X's search or timelines.
+
+**Opener text** is category-matched, not one flat generic pool — "Worth a look:"/"Spotted
+this:" on every single post reads as filler, not engaging. `_pick_opener` derives the
+category from whichever `GOSSIP_SIGNAL_RE` word actually matched the real headline (marriage
+drama, addiction/vices, legal trouble, public meltdown, scandal, or courtroom drama each get
+their own small pool), so this is still "aggregate, never fabricate": it only describes what
+KIND of already-published story this is — the same signal that qualified it as gossip in the
+first place — never inventing new detail.
+
+**Compose-time validation, read from the real rendered page, not assumed.** Two real
+incidents (an opener duplicated as "Worth a look: ... Worth a look:", and — worse — the
+quote-tweet embed silently failing to attach, posting bare opener text with no source at all)
+both happened because the code trusted its own input to X's intent-URL mechanism without
+ever checking what actually rendered. `post_quote_tweet` now reads back the compose box's
+real text (`page.inner_text`) after a settle delay and runs it through
+`_validate_compose_text` — checking for emptiness, over-length, an unresolved Google link, a
+duplicated line, a template/placeholder artifact (`{`, `None`, etc. — a defense against
+anything code-shaped leaking into a post), and the quoted tweet's own URL sitting in the text
+as plain, unconverted content — before ever clicking Post. A validation failure raises
+`ComposeValidationError` and the whole candidate is skipped (not marked seen, not treated as
+a hard failure) so `run_cycle` tries the next one instead of either posting something broken
+or aborting the entire cycle.
 
 ## Cadence and multi-post
 

@@ -85,36 +85,51 @@ GOSSIP_SIGNAL_RE = re.compile(
     # Vices / personal struggles
     r"addiction|rehab|relapse[ds]?|overdose[ds]?|sober(?:riety)?|alcoholi\w+|"
     r"substance\s+abuse|dui|intervention|breakdown|"
-    # Legal / criminal, personal
-    r"arrest(?:ed)?|jail(?:ed)?|prison|indict\w+|charged|mugshot|subpoena\w*|"
+    # Legal / criminal, personal -- "fined" added per explicit request (a court/regulatory
+    # fine levied on the person themselves, not a routine corporate line item)
+    r"arrest(?:ed)?|jail(?:ed)?|prison|indict\w+|charged|fined|mugshot|subpoena\w*|"
     r"restraining\s+order|assault(?:ed)?|harass\w+|misconduct|abuse[ds]?|"
     # Family drama
     r"disown\w+|inheritance\s+battle|estate\s+battle|will\s+dispute|"
-    # Interpersonal conflict (not "fight" -- see note above)
+    # Interpersonal conflict -- bare "fight(s)" still deliberately excluded (see note above),
+    # but these unambiguous multi-word phrasings for an actual fight are safe to add: they
+    # essentially never appear in a business/regulatory headline the way "fights the lawsuit"
+    # does.
     r"feud|rivalry|clash(?:es)?|brawl|blow-?up|meltdown|showdown|spat|"
-    r"snub(?:s|bed)?|confrontation|altercation|"
-    # Public embarrassment / secret exposure
-    r"scandal|drama|expos(?:e|es|ed)|leaked?\s+(?:photos?|texts?|messages?|audio|video)|"
+    r"snub(?:s|bed)?|confrontation|altercation|shouting\s+match|screaming\s+match|"
+    r"fist\W?fight|"
+    # Public embarrassment / secret exposure / general oddity ("weird things" per explicit
+    # request -- kept to the rarer, more specifically tabloid-flavored word to limit noise)
+    r"scandal|drama|bizarre|expos(?:e|es|ed)|leaked?\s+(?:photos?|texts?|messages?|audio|video)|"
     r"caught|spotted\s+(?:with|dating)|fling|tryst|hookup|"
     # Career/legal conflict carried over from before -- still genuinely ambiguous between
-    # personal and professional, disambiguated by BUSINESS_OUTCOME_RE below
+    # personal and professional, disambiguated by ROUTINE_BUSINESS_RE below
     r"lawsuit|sues?|sued|fired|ousted|slams?|blasts?(?:ed)?|accus\w+|shake-?up|rift|fallout"
     r")\b",
     re.I,
 )
 
 # Negative filter: reject a headline even if it matched a gossip-signal word above, when the
-# same headline is clearly framing a resolved BUSINESS or political arrangement rather than
-# personal drama. Confirmed live: "Trump And Musk Have Now Turned Their Bitter Feud Into A
-# $100 Million Alliance" matched "feud" but is a business/political deal story, not gossip --
-# exactly the kind of routine business news dressed up in dramatic language this account
-# should never post. This is deliberately the ONLY disambiguation mechanism for words like
-# "feud"/"rivalry"/"clash" that are genuinely ambiguous between personal and professional
-# conflict -- a real personal feud headline won't also mention a deal/alliance/merger.
-BUSINESS_OUTCOME_RE = re.compile(
+# same headline is clearly routine BUSINESS/political/market news dressed up in dramatic
+# language, rather than personal drama. Confirmed live: "Trump And Musk Have Now Turned Their
+# Bitter Feud Into A $100 Million Alliance" matched "feud" but is a business/political deal
+# story, not gossip. This is deliberately the ONLY disambiguation mechanism for words like
+# "feud"/"rivalry"/"clash"/"lawsuit" that are genuinely ambiguous between personal and
+# professional conflict -- a real personal-drama headline essentially never also reports an
+# earnings figure, a stock move, or a deal outcome in the same breath.
+#
+# Broadened beyond just deal/alliance framing (per "be much stricter") to also catch routine
+# financial-reporting and regulatory/market language -- these were previously only screened
+# out incidentally by GOSSIP_SIGNAL_RE not matching at all, which isn't reliable once
+# "lawsuit"/"fired"/"fallout" etc. are in the positive list.
+ROUTINE_BUSINESS_RE = re.compile(
     r"\b(alliance|merger|acquisition|partnership|joint\s+venture|venture|ipo|buyout|"
     r"takeover|tie-?up|team(?:s|ed)?\s+up|joins?\s+forces|stake|funding\s+round|"
-    r"board\s+seat)\b",
+    r"board\s+seat|"
+    r"earnings|quarterly\s+results?|revenue|q[1-4]\s+results?|guidance|dividend|buyback|"
+    r"shares?\s+(?:rose|fell|surged?|dropped?|jumped?|rallied|slid|slumped)|stock\s+price|"
+    r"market\s+cap|valuation|layoffs?|job\s+cuts|"
+    r"tariff|antitrust|interest\s+rate|monetary\s+policy|rate\s+(?:hike|cut|decision))\b",
     re.I,
 )
 
@@ -163,8 +178,15 @@ def _prune_date_keyed_dict(d: dict, max_age_days: int):
         del d[key]
 
 
+def _prune_old_signatures(signatures: list, max_age_days: int) -> list:
+    """Same pruning idea as _prune_date_keyed_dict, but for the posted_signatures LIST (see
+    _story_already_covered) rather than a fingerprint dict."""
+    cutoff = (datetime.date.today() - datetime.timedelta(days=max_age_days)).isoformat()
+    return [s for s in signatures if s.get("date", "") >= cutoff]
+
+
 def _is_gossip_worthy(headline: str) -> bool:
-    return bool(GOSSIP_SIGNAL_RE.search(headline)) and not BUSINESS_OUTCOME_RE.search(headline)
+    return bool(GOSSIP_SIGNAL_RE.search(headline)) and not ROUTINE_BUSINESS_RE.search(headline)
 
 
 _GOOGLE_NEWS_SIG_RE = re.compile(r'data-n-a-sg="([^"]+)"')
@@ -306,12 +328,15 @@ def fetch_person_news(name: str, max_items: int = 10) -> list[dict]:
 # $6.2B divorce (Two Sigma's co-founder, absolutely a "financial titan" but not someone
 # anyone thought to put on a fixed name list in advance). A curated watchlist, no matter how
 # broad, always has blind spots; this is the actual fix for that, not just a bigger list.
+# Query terms kept in sync with GOSSIP_SIGNAL_RE's actual (personal-drama-focused) vocabulary
+# -- previously included "resigns", which was removed from the positive filter as a false-
+# positive magnet, so it was wastefully fetching candidates that would just get discarded.
 INDUSTRY_TOPIC_QUERIES = [
     '("hedge fund" OR "private equity" OR "Wall Street" OR "billionaire investor" OR '
-    '"fund manager") (divorce OR lawsuit OR sues OR sued OR feud OR fired OR resigns OR '
-    'scandal OR fraud OR indicted OR ousted)',
-    '("hedge fund" OR "fund founder" OR "fund CEO" OR "fund co-founder") '
-    '(court battle OR settlement OR subpoena OR SEC probe)',
+    '"fund manager") (divorce OR affair OR cheating OR addiction OR rehab OR arrested OR '
+    'jailed OR indicted OR fined OR feud OR scandal OR meltdown)',
+    '("hedge fund" OR "fund founder" OR "fund CEO" OR "fund co-founder" OR "billionaire") '
+    '(court battle OR settlement OR subpoena OR SEC probe OR fraud)',
 ]
 
 
@@ -392,14 +417,17 @@ def _dedup_key(a: dict) -> str:
     return (a.get("link") or a["headline"]).strip().lower()
 
 
-def _passes_gossip_filters(a: dict, cutoff: datetime.datetime, seen: dict) -> bool:
+def _passes_gossip_filters(a: dict, cutoff: datetime.datetime, seen: dict, signatures: list,
+                            person: str) -> bool:
     if not a.get("published") or a["published"] < cutoff:
         return False
     if not _is_gossip_worthy(a["headline"]):
         return False
     if (a.get("source") or "").lower() in BLOCKLIST_SOURCES:
         return False
-    return _dedup_key(a) not in seen
+    if _dedup_key(a) in seen:
+        return False
+    return not _story_already_covered(a["headline"], person, signatures)
 
 
 def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
@@ -411,18 +439,25 @@ def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
     per post)."""
     seen = state.setdefault("gossip_seen", {})
     _prune_date_keyed_dict(seen, GOSSIP_SEEN_MEMORY_DAYS)
+    # Content-based dedup, separate from (and in addition to) the exact-fingerprint dict
+    # above -- catches the SAME underlying story resurfacing via a different link, a
+    # different search query, or as a tweet instead of an article, none of which share a
+    # fingerprint with each other. Persisted across cycles/runs, not just within one call
+    # (unlike the within-cycle-only near-duplicate collapse further below).
+    signatures = _prune_old_signatures(state.setdefault("posted_signatures", []), GOSSIP_SEEN_MEMORY_DAYS)
+    state["posted_signatures"] = signatures
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(hours=NEWS_FRESHNESS_HOURS)
 
     candidates = []
 
     for name in TITANS_WATCHLIST:
         for a in fetch_person_news(name):
-            if _passes_gossip_filters(a, cutoff, seen):
+            if _passes_gossip_filters(a, cutoff, seen, signatures, name):
                 candidates.append({**a, "person": name, "fingerprint": _dedup_key(a)})
 
     for query in INDUSTRY_TOPIC_QUERIES:
         for a in fetch_topic_news(query):
-            if _passes_gossip_filters(a, cutoff, seen):
+            if _passes_gossip_filters(a, cutoff, seen, signatures, "industry-wide"):
                 candidates.append({**a, "person": "industry-wide", "fingerprint": _dedup_key(a)})
 
     for name in TITANS_WATCHLIST:
@@ -431,6 +466,9 @@ def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
                 continue
             if not _is_gossip_worthy(a["headline"]):
                 continue
+            if _story_already_covered(a["headline"], name, signatures):
+                continue  # same story as an already-posted article/tweet -- skip before
+                          # paying for the resolve + oEmbed calls below
             # Cheap text filter passed -- now pay for resolve + oEmbed, only for candidates
             # that already look promising.
             resolved = _resolve_google_news_url(a.get("link") or "")
@@ -494,6 +532,56 @@ def _headline_similarity(a: str, b: str) -> float:
     if not wa or not wb:
         return 0.0
     return len(wa & wb) / len(wa | wb)
+
+
+def _headline_containment(a: str, b: str) -> float:
+    """Like _headline_similarity, but divides by the SMALLER word-set instead of the union --
+    robust to comparing texts of very different length/style (a terse news headline vs. a
+    tweet's own, much wordier phrasing of the same news), where Jaccard under-counts a real
+    duplicate just because one side has extra words. Confirmed by direct test: a genuine
+    same-story pair (a news headline vs. the tweet reporting that exact story) scored only
+    0.44-0.48 on Jaccard -- under the within-cycle 0.5 threshold -- but 0.70-1.0 on
+    containment. Only used for the cross-cycle/cross-medium check below, paired with a
+    person-name anchor, since containment alone is too permissive on its own (two DIFFERENT
+    people's similarly-phrased divorce headlines also score ~0.7)."""
+    wa = set(re.findall(r"[a-z0-9]+", a.lower()))
+    wb = set(re.findall(r"[a-z0-9]+", b.lower()))
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / min(len(wa), len(wb))
+
+
+# Cross-cycle/cross-medium dedup thresholds (see _story_already_covered) -- deliberately
+# separate from SAME_STORY_OVERLAP_THRESHOLD (the within-cycle, Jaccard-based check above,
+# left unchanged since it's already proven on same-cycle candidates, which tend to be
+# similarly-worded to begin with). Two tiers: a looser, containment-based bar when both sides
+# name the SAME specific titan (safe to be generous -- if two headlines about the identical
+# named person share this much vocabulary, it's the same event), and a much stricter bar
+# when the person is unknown on either side (an industry-wide topic hit, or a mismatched
+# name) -- confirmed by direct test that the loose bar alone would wrongly treat two
+# DIFFERENT people's similarly-phrased divorce headlines as the same story.
+SAME_STORY_CONTAINMENT_THRESHOLD = 0.6
+SAME_STORY_STRICT_CONTAINMENT_THRESHOLD = 0.85
+
+
+def _is_specific_person(person: str) -> bool:
+    return bool(person) and person != "industry-wide"
+
+
+def _story_already_covered(headline: str, person: str, signatures: list) -> bool:
+    """Checked against EVERY story already posted in the last GOSSIP_SEEN_MEMORY_DAYS days
+    (state["posted_signatures"]), regardless of cycle or medium. This is the actual fix for
+    "the same story posted twice, once as an article link and once as someone tweeting about
+    it" -- an article's link-based fingerprint and a tweet's status-ID fingerprint never
+    collide with each other even when they're about the literal same news, so fingerprint-
+    only dedup can't catch it."""
+    for s in signatures:
+        same_person = (_is_specific_person(person) and _is_specific_person(s.get("person", ""))
+                        and person.lower() == s["person"].lower())
+        threshold = SAME_STORY_CONTAINMENT_THRESHOLD if same_person else SAME_STORY_STRICT_CONTAINMENT_THRESHOLD
+        if _headline_containment(headline, s["headline"]) >= threshold:
+            return True
+    return False
 
 
 # Recurring column/section branding some trade-press outlets prefix onto EVERY headline in
@@ -590,27 +678,62 @@ def _effective_tweet_length(text: str) -> int:
     return len(_URL_RE.sub("x" * 23, text))
 
 
+# Any of these appearing in text about to be posted means something upstream broke -- an
+# unformatted template placeholder, a stray repr() of None, or similar -- never a real,
+# intentional part of a tweet. Belt-and-braces against "part of a prompt/template leaking
+# into a post," which showed up as a real (if different-shaped) problem before.
+_TEMPLATE_ARTIFACT_MARKERS = ("{", "}", "None", "undefined", "PLACEHOLDER_HANDLE", "TODO")
+
+
+class ComposeValidationError(Exception):
+    """Raised when the text about to be posted (or, for a quote-tweet, what X's compose box
+    actually rendered) fails a sanity check -- distinct from a hard automation/infra failure
+    (session expired, browser crash) so callers can skip just this one candidate instead of
+    aborting the whole posting cycle."""
+
+
+def _validate_compose_text(text: str, *, leak_check: str | None = None) -> None:
+    """Shared, rigid pre-post gate for anything about to go out, whether it's a plain tweet
+    or what got read back from X's own compose box after a quote-tweet intent URL rendered.
+    Raises ComposeValidationError with a specific reason instead of returning a bool, so the
+    log always says exactly what was wrong. leak_check, when given (a quote-tweet's own
+    tweet_url), catches the case where X failed to convert it into an embed card and just
+    left the raw URL sitting in the text as plain text instead."""
+    if not text or not text.strip():
+        raise ComposeValidationError("empty text")
+    effective_len = _effective_tweet_length(text)
+    if effective_len > 280:
+        raise ComposeValidationError(f"effective length {effective_len} exceeds 280")
+    if "news.google.com" in text:
+        raise ComposeValidationError("contains an unresolved Google News link instead of "
+                                      "the real source")
+    for marker in _TEMPLATE_ARTIFACT_MARKERS:
+        if marker in text:
+            raise ComposeValidationError(f"contains template/placeholder artifact {marker!r}")
+    # Catches "Worth a look: ... Worth a look:" style duplication -- the same opener/line
+    # appearing twice in the same short post, which is exactly what happened when the
+    # intent-URL prefill raced our own scripted interaction with the compose box.
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if len(lines) != len(set(lines)):
+        raise ComposeValidationError("contains a duplicated line")
+    if leak_check and leak_check in text:
+        raise ComposeValidationError(
+            "quoted tweet URL is sitting in the compose text as plain text -- the embed "
+            "card likely failed to attach")
+
+
 def post_tweet(text: str, state: dict) -> bool:
     """Playwright-based posting via a saved session cookie — same mechanism as the ticker
     bot, pointed at this account's own session file."""
-    # Defense in depth: verify the ACTUAL effective length right before posting, not just
-    # trust generate_tweet's own budget math. A deleted real tweet was found cut off
-    # mid-word with no trailing "…" — a shape neither version of generate_tweet's own
-    # truncation should produce — so something in this pipeline can still generate an
-    # over-budget tweet; this catches that instead of silently posting a broken one.
-    effective_len = _effective_tweet_length(text)
-    if effective_len > 280:
-        log.error("Refusing to post — effective length %d exceeds 280 (X would silently "
-                   "truncate this itself, which is likely what caused the mid-word cutoff "
-                   "seen before): %r", effective_len, text[:80])
-        return False
-    # Defense in depth: never post a raw Google News redirect link (a Google interstitial,
-    # not the real source) — run_cycle already skips an item whose link failed to resolve,
-    # but this guards the posting function itself against any other path that might
-    # construct a tweet with an unresolved link.
-    if "news.google.com" in text:
-        log.error("Refusing to post — text contains an unresolved Google News link instead "
-                   "of the real source: %r", text[:80])
+    # Defense in depth: re-verify the text against every known failure mode right before
+    # posting, not just trust generate_tweet's own budget math. A deleted real tweet was once
+    # found cut off mid-word with no trailing "…" -- a shape generate_tweet's own truncation
+    # should never produce -- so something in this pipeline can still generate a broken
+    # tweet; this catches that instead of silently posting it.
+    try:
+        _validate_compose_text(text)
+    except ComposeValidationError as e:
+        log.error("Refusing to post — %s: %r", e, text[:80])
         return False
     if DRY_RUN:
         log.info("[DRY RUN] Would post:\n%s", text)
@@ -640,24 +763,55 @@ def post_tweet(text: str, state: dict) -> bool:
 # no added text at all reads as a bare, contentless repost (worse when the quoted tweet is
 # itself just an image) — not a fabricated claim, just a short reaction cue, never a
 # restatement/summary of the quoted tweet's actual content.
-QUOTE_TWEET_OPENERS = [
-    "Spotted this:",
-    "Well, this is a lot:",
-    "This just happened:",
-    "Worth a look:",
-    "Some tea:",
-    "This is wild:",
+#
+# Category-matched instead of one flat generic pool -- "Worth a look:"/"Spotted this:" on
+# EVERY post reads as filler, not engaging. The category is derived from which
+# GOSSIP_SIGNAL_RE word actually matched the real headline, so this is still "aggregate,
+# never fabricate": we're only describing what KIND of already-published story this is, the
+# same signal that qualified it as gossip in the first place, never inventing new detail.
+# First matching category wins; keep the generic pool ONLY as a last-resort fallback.
+_OPENER_CATEGORIES = [
+    (re.compile(r"\b(divorc\w+|affair|cheat(?:s|ed|ing)?|mistress|infidelit\w+|break-?up|"
+                r"broke\s+up|split(?:s|ting)?\s+(?:from|with)|estranged|separat(?:ed|ion)|"
+                r"custody|prenup|alimony)\b", re.I),
+     ["Marriage drama:", "Splitsville:", "Divorce court chatter:", "Love (and money), gone wrong:"]),
+    (re.compile(r"\b(addiction|rehab|relapse[ds]?|overdose[ds]?|sober(?:riety)?|alcoholi\w+|"
+                r"substance\s+abuse|dui|intervention)\b", re.I),
+     ["A tough one:", "Personal struggle making headlines:", "Not an easy read:"]),
+    (re.compile(r"\b(arrest(?:ed)?|jail(?:ed)?|prison|indict\w+|charged|fined|mugshot)\b", re.I),
+     ["Legal trouble:", "Uh oh:", "Not a good day in court:"]),
+    (re.compile(r"\b(meltdown|blow-?up|showdown|brawl|confrontation|altercation|"
+                r"shouting\s+match|screaming\s+match|fist\W?fight|bizarre)\b", re.I),
+     ["Things got heated:", "Public meltdown alert:", "This escalated fast:"]),
+    (re.compile(r"\b(scandal|expos(?:e|es|ed)|leaked?\s+(?:photos?|texts?|messages?|audio|video)|"
+                r"caught|spotted\s+(?:with|dating)|fling|tryst|hookup)\b", re.I),
+     ["Scandal watch:", "This is getting messy:", "Well, this came out:"]),
+    (re.compile(r"\b(lawsuit|sues?|sued|fired|ousted|feud|rivalry|clash(?:es)?)\b", re.I),
+     ["Courtroom drama:", "Legal drama:", "This just got messy:"]),
 ]
+_GENERIC_OPENERS = ["Finance gossip alert:", "The rumor mill is turning:", "This is making the rounds:"]
 
 
-def post_quote_tweet(tweet_url: str, state: dict) -> bool:
+def _pick_opener(headline: str) -> str:
+    for pattern, openers in _OPENER_CATEGORIES:
+        if pattern.search(headline):
+            return random.choice(openers)
+    return random.choice(_GENERIC_OPENERS)  # shouldn't normally happen -- is_gossip_worthy
+                                             # already required a GOSSIP_SIGNAL_RE match
+
+
+def post_quote_tweet(tweet_url: str, headline: str, state: dict) -> bool | str:
     """Quote-tweets a genuine, already-public tweet via X's own documented intent URL
     (x.com/intent/tweet?url=...) — this is X's officially supported sharing flow, not
-    scraping. Adds a short, neutral reaction opener (never a summary/restatement of the
-    quoted tweet's own content) so the post never reads as a bare, textless repost — the
+    scraping. Adds a short, category-matched reaction opener (never a summary/restatement of
+    the quoted tweet's own content) so the post never reads as a bare, textless repost — the
     quoted tweet (someone else's real reaction/gossip about a titan, never their own tweet,
-    see _is_self_authored) still carries all the actual substance."""
-    opener = random.choice(QUOTE_TWEET_OPENERS)
+    see _is_self_authored) still carries all the actual substance.
+
+    Returns True (posted), False (a real failure -- caller should stop the whole cycle), or
+    the string "skip" (this specific candidate's compose render failed validation -- caller
+    should move on to the next candidate, not mark this one seen, and not abort the cycle)."""
+    opener = _pick_opener(headline)
     if DRY_RUN:
         log.info("[DRY RUN] Would quote-tweet %r + %s", opener, tweet_url)
         return True
@@ -683,6 +837,18 @@ def post_quote_tweet(tweet_url: str, state: dict) -> bool:
             # Give the async quote-tweet embed card time to actually attach before
             # submitting -- clicking too early risks posting before it's rendered.
             page.wait_for_timeout(3000)
+            # Rigid check: read back what X's compose box ACTUALLY rendered, rather than
+            # trusting the URL params did what we asked. This is what would have caught both
+            # prior incidents (duplicated opener text, and the embed silently failing to
+            # attach leaving the bare URL as text) before they ever posted.
+            rendered = page.inner_text('[data-testid="tweetTextarea_0"]').strip()
+            try:
+                _validate_compose_text(rendered, leak_check=tweet_url)
+            except ComposeValidationError as e:
+                browser.close()
+                log.warning("Skipping quote-tweet (compose render failed validation, not a "
+                            "hard error) — %s | rendered=%r | %s", e, rendered[:80], tweet_url)
+                return "skip"
             page.click('[data-testid="tweetButton"]')
             page.wait_for_timeout(3000)
             browser.close()
@@ -705,7 +871,7 @@ def run_cycle():
         if item.get("is_tweet"):
             # Already resolved to a genuine tweet permalink during discovery — no article
             # context concept applies here, we're quoting the tweet itself, not summarizing it.
-            ok = post_quote_tweet(item["link"], state)
+            ok = post_quote_tweet(item["link"], item["headline"], state)
         else:
             # Only resolve the links of items actually being posted, not every candidate
             # scanned — each resolution is an extra request to Google's redirect-decode
@@ -724,14 +890,27 @@ def run_cycle():
             # unnecessary, but only worth the extra request for items actually being posted.
             item["context"] = fetch_article_context(item["link"])
             ok = post_tweet(generate_tweet(item), state)
+        if ok == "skip":
+            # This specific candidate's compose render failed validation (see
+            # post_quote_tweet) -- not a hard/infra failure, so try the next candidate
+            # instead of aborting the whole cycle, and don't mark it seen since it never
+            # actually posted.
+            continue
         if not ok:
-            break  # a post failure (e.g. session expired) — don't keep trying the rest
+            break  # a real failure (e.g. session expired) — don't keep trying the rest
         posted += 1
         if not DRY_RUN:
             # Only mark seen / persist state on a real post — a dry run must have zero
             # lasting effect, or an item it just previewed would be silently blocked from
             # actually being posted on the next real run.
             state.setdefault("gossip_seen", {})[item["fingerprint"]] = today()
+            # Content-based signature, kept alongside the fingerprint dict -- see
+            # _story_already_covered. This is what stops the SAME story from posting again
+            # later via a different link or as a tweet, which a fingerprint alone can't catch
+            # since a link-based and a tweet-ID-based fingerprint never collide.
+            state.setdefault("posted_signatures", []).append({
+                "headline": item["headline"], "person": item.get("person", ""), "date": today(),
+            })
             save_state(state)
             if i < len(items) - 1:
                 # Brief pacing gap between multiple posts in one cycle so they don't land
