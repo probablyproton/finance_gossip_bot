@@ -774,7 +774,7 @@ _OPENER_CATEGORIES = [
     (re.compile(r"\b(divorc\w+|affair|cheat(?:s|ed|ing)?|mistress|infidelit\w+|break-?up|"
                 r"broke\s+up|split(?:s|ting)?\s+(?:from|with)|estranged|separat(?:ed|ion)|"
                 r"custody|prenup|alimony)\b", re.I),
-     ["Marriage drama:", "Splitsville:", "Divorce court chatter:", "Love (and money), gone wrong:"]),
+     ["Marriage drama:", "Splitsville:", "Love (and money), gone wrong:"]),
     (re.compile(r"\b(addiction|rehab|relapse[ds]?|overdose[ds]?|sober(?:riety)?|alcoholi\w+|"
                 r"substance\s+abuse|dui|intervention)\b", re.I),
      ["A tough one:", "Personal struggle making headlines:", "Not an easy read:"]),
