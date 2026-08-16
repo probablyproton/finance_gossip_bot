@@ -253,6 +253,36 @@ _FUNCTION_WORDS_RE = re.compile(
 _MIN_FUNCTION_WORD_HITS = 5
 
 
+# A single Unicode ellipsis char ("…", one codepoint that renders as three dots) is ALWAYS a
+# truncation signal by itself, optionally followed by one more literal period (the real
+# observed case "…." -- renders as four dots). Separately, 2+ literal ASCII periods in a row
+# ("..", "...") are also always truncation. A LONE single "." is deliberately excluded from
+# both -- that's just a normal, complete sentence ending. (First version of this regex
+# required 2+ characters from a combined set, which wrongly missed a bare trailing "…" since
+# that's only one character -- confirmed by direct test before fixing.)
+_TRAILING_TRUNCATION_RE = re.compile(r"(…\.?|\.{2,})\s*$")
+
+
+def _strip_source_truncation(text: str) -> str:
+    """Some sites' static HTML (what a plain requests.get sees, with no JS execution) only
+    ever contains a truncated TEASER paragraph -- the rest loads dynamically via JS, or is
+    gated behind a paywall -- ending in the SOURCE'S OWN trailing ellipsis, not ours.
+    Confirmed live: a post still ended mid-thought ("...though there's been plenty examples
+    of that in the past ….") even after generate_tweet's own sentence-boundary truncation
+    fix, because the fetched text was already incomplete before generate_tweet ever touched
+    it -- and the exact trailing shape ("….", an ellipsis char plus one more literal period)
+    didn't match a naive check for just "..." or "…" alone, so the first version of this
+    function missed it too; confirmed by direct test before fixing. Keeps only the complete
+    sentences before the trailing ellipsis; if none are complete, returns '' so the caller
+    falls back to the headline instead of posting a fragment."""
+    if not _TRAILING_TRUNCATION_RE.search(text):
+        return text
+    body = _TRAILING_TRUNCATION_RE.sub("", text).rstrip()
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(body) if s.strip()]
+    complete = sentences[:-1]  # the last one is presumably the truncated one
+    return " ".join(complete)
+
+
 def fetch_article_context(url: str, max_chars: int = 300) -> str:
     """Best-effort extraction of the article's own opening paragraph, so the tweet can carry
     real substance instead of just a headline — confirmed empirically that Google News RSS's
@@ -273,6 +303,9 @@ def fetch_article_context(url: str, max_chars: int = 300) -> str:
                 continue
             if len(_FUNCTION_WORDS_RE.findall(text)) < _MIN_FUNCTION_WORD_HITS:
                 continue  # reads like a nav/breadcrumb block, not a real sentence
+            text = _strip_source_truncation(text)
+            if not text:
+                continue  # this paragraph was ENTIRELY a truncated teaser -- try the next <p>
             return text[:max_chars]
     except Exception as e:
         log.warning("Article context fetch failed for %s: %s", url, e)
@@ -338,6 +371,20 @@ INDUSTRY_TOPIC_QUERIES = [
     '("hedge fund" OR "fund founder" OR "fund CEO" OR "fund co-founder" OR "billionaire") '
     '(court battle OR settlement OR subpoena OR SEC probe OR fraud)',
 ]
+
+# Google News full-text search matches on the ARTICLE'S BODY, not just its headline -- so a
+# query term like "Wall Street" or "addiction" can match because it appears once, in passing,
+# somewhere in a totally unrelated piece. Confirmed live: a WSJ "Future of Everything" column
+# about a general kratom-addiction societal trend (headline never mentions any person, role,
+# or company at all) matched on "addiction" and got posted. Since _is_gossip_worthy only ever
+# checks the HEADLINE text, a topic-search hit additionally has to actually reference a
+# finance-industry person/role IN ITS OWN HEADLINE -- not rely on the query's terms having
+# matched somewhere in the body. Per-person search doesn't need this: a name match already
+# guarantees the headline (or at least the story) is about that specific person.
+_FINANCE_PERSON_ROLE_RE = re.compile(
+    r"\b(CEO|billionaire|hedge fund|private equity|investor|co-founder|founder|chairman|"
+    r"executive|fund manager|Wall Street)\b", re.I,
+)
 
 
 def fetch_topic_news(query: str, max_items: int = 15) -> list[dict]:
@@ -457,6 +504,9 @@ def find_gossip_items(state: dict, max_items: int = 1) -> list[dict]:
 
     for query in INDUSTRY_TOPIC_QUERIES:
         for a in fetch_topic_news(query):
+            if not _FINANCE_PERSON_ROLE_RE.search(a["headline"]):
+                continue  # query matched somewhere in the article body, not the headline --
+                          # see _FINANCE_PERSON_ROLE_RE for why that's not good enough alone
             if _passes_gossip_filters(a, cutoff, seen, signatures, "industry-wide"):
                 candidates.append({**a, "person": "industry-wide", "fingerprint": _dedup_key(a)})
 
