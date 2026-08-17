@@ -299,14 +299,24 @@ def fetch_article_context(url: str, max_chars: int = 300) -> str:
         body = re.sub(r"(?is)<script.*?</script>|<style.*?</style>", " ", resp.text)
         for p in re.findall(r"(?is)<p[^>]*>(.*?)</p>", body):
             text = re.sub(r"\s+", " ", html_module.unescape(re.sub(r"<[^>]+>", " ", p))).strip()
-            if len(text) < 80 or _NAV_JUNK_RE.search(text):
+            if len(text) < 80:
                 continue
-            if len(_FUNCTION_WORDS_RE.findall(text)) < _MIN_FUNCTION_WORD_HITS:
+            # Validate the ACTUAL slice we're about to output, not the full raw <p> text --
+            # confirmed live this was a real bug: some sites' markup dumps their entire
+            # category/nav list into one oversized <p> block ahead of any real prose (e.g.
+            # "Search Home Categories Dallas ... Crime Education Business ..."). The full
+            # block could satisfy the function-word-density check on the strength of real
+            # sentences buried further in, while the first max_chars characters -- what
+            # actually gets posted -- were 100% nav junk with zero function words in it.
+            candidate = text[:max_chars]
+            if _NAV_JUNK_RE.search(candidate):
+                continue
+            if len(_FUNCTION_WORDS_RE.findall(candidate)) < _MIN_FUNCTION_WORD_HITS:
                 continue  # reads like a nav/breadcrumb block, not a real sentence
-            text = _strip_source_truncation(text)
-            if not text:
-                continue  # this paragraph was ENTIRELY a truncated teaser -- try the next <p>
-            return text[:max_chars]
+            candidate = _strip_source_truncation(candidate)
+            if not candidate:
+                continue  # this slice was ENTIRELY a truncated teaser -- try the next <p>
+            return candidate
     except Exception as e:
         log.warning("Article context fetch failed for %s: %s", url, e)
     return ""
