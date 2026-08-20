@@ -108,12 +108,19 @@ GOSSIP_SIGNAL_RE = re.compile(
     # words themselves.
     r"lawsuit\w*|sues?|sued|countersue\w*|settlement|settles?|class[- ]action|"
     r"legal\s+battle|court\s+battle|files?\s+(?:a\s+)?lawsuit|verdict|plaintiff|defendant|"
-    r"deposition|testif(?:y|ies|ied)|litigation|"
-    # Career conflict carried over from before -- same disambiguation
-    r"fired|ousted|slams?|blasts?(?:ed)?|accus\w+|shake-?up|rift|fallout"
+    r"deposition|testif(?:y|ies|ied)|litigation|accus\w+"
     r")\b",
     re.I,
 )
+
+# REMOVED per explicit request ("remove finance/business news entirely... it should mostly
+# be off-work personal issues, lawsuits, etc."): "fired"/"ousted"/"shake-up"/"slams"/"blasts"/
+# "rift"/"fallout" all describe a CAREER/business event on their own, with no personal-life
+# content required at all -- "Exec fired amid boardroom shake-up" is pure business news and
+# would have passed with none of ROUTINE_BUSINESS_RE's deal/earnings/stock/regulatory words
+# present to catch it. Lawsuits and genuine interpersonal conflict (feud, rivalry, clash,
+# brawl -- see above) stay in scope; a pure career/business event, even dramatically framed,
+# does not.
 
 # Negative filter: reject a headline even if it matched a gossip-signal word above, when the
 # same headline is clearly routine BUSINESS/political/market news dressed up in dramatic
@@ -854,7 +861,7 @@ _OPENER_CATEGORIES = [
      ["Scandal watch:", "This is getting messy:", "Well, this came out:"]),
     (re.compile(r"\b(lawsuit\w*|sues?|sued|countersue\w*|settlement|settles?|class[- ]action|"
                 r"legal\s+battle|court\s+battle|verdict|plaintiff|defendant|deposition|"
-                r"testif(?:y|ies|ied)|litigation|fired|ousted|feud|rivalry|clash(?:es)?)\b", re.I),
+                r"testif(?:y|ies|ied)|litigation|feud|rivalry|clash(?:es)?)\b", re.I),
      ["Courtroom drama:", "Legal drama:", "This just got messy:"]),
 ]
 _GENERIC_OPENERS = ["Finance gossip alert:", "The rumor mill is turning:", "This is making the rounds:"]

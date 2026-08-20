@@ -32,17 +32,23 @@ not present in the source — applies here even more strictly:
    Reuters, WSJ, Fortune, Business Insider, Forbes, CNBC, Axios, Puck, Semafor, Page Six
    Business, NY Post Business, Financial Times, Vanity Fair, The Information. A blocklist
    keeps out satire sites, fabrication mills, and pure stock-tout content farms.
-4. **Personal drama, not routine business news in disguise.** This account is the paparazzi
-   of finance, not a business-news feed with spicier headlines. In scope: divorce/custody
-   battles, affairs, addiction/rehab, arrests, and personal feuds/fights -- situations these
-   people would rather not be in at all. Out of scope: a business deal, merger, or political
-   alliance framed with dramatic language ("feud," "rivalry," "clash") is NOT gossip just
-   because the headline uses conflict words. Real example that slipped through and had to be
+4. **Personal drama, not routine business/career news in disguise.** This account is the
+   paparazzi of finance, not a business-news feed with spicier headlines. In scope: off-work
+   personal life -- divorce/custody battles, affairs, addiction/rehab, arrests, lawsuits, and
+   personal feuds/fights -- situations these people would rather not be in at all. Out of
+   scope, even when dramatically framed: (a) a business deal, merger, or political alliance
+   ("feud," "rivalry," "clash" used to describe a deal outcome), and (b) a plain career/
+   business event on its own -- getting fired, ousted, a boardroom shake-up, slamming a
+   rival's business strategy, an internal rift, market fallout -- none of which are personal
+   life, even if framed dramatically. Two real examples that slipped through and had to be
    excluded: "Trump And Musk Have Now Turned Their Bitter Feud Into A $100 Million Alliance"
-   — a business/political deal story, not personal drama. `BUSINESS_OUTCOME_RE` in
-   `gossip_bot.py` is the mechanism that catches this: it rejects a headline that matched a
-   gossip-signal word if it ALSO mentions a deal/alliance/merger outcome, since a genuine
-   personal feud headline never does.
+   (a business/political deal story) and, more generally, headlines like "Exec fired amid
+   boardroom shake-up" (pure career news with no personal content at all). `ROUTINE_BUSINESS_RE`
+   in `gossip_bot.py` catches case (a) by rejecting a headline that matched a gossip-signal
+   word if it ALSO mentions a deal/earnings/stock/regulatory outcome; case (b) is handled by
+   simply not including "fired"/"ousted"/"shake-up"/"slams"/"blasts"/"rift"/"fallout" in the
+   positive filter at all, since a genuine personal-drama headline doesn't need them --
+   lawsuits and genuine interpersonal conflict (feud, rivalry, clash, brawl) stay in scope.
 5. **No financial advice, no market-moving insinuation.** Never frame a story as investment
    guidance, and never imply insider-trading-adjacent claims without the source itself
    making that claim.
@@ -61,12 +67,12 @@ overdose, DUI), legal/criminal-personal (arrest, jail, indictment, assault, hara
 fined), family drama (disowned, inheritance/estate battles), interpersonal conflict (feud,
 rivalry, clash, brawl, confrontation, shouting/screaming match, fistfight), public
 embarrassment/oddity (scandal, bizarre, exposed, leaked photos/texts, caught, spotted with),
-lawsuits/legal disputes (lawsuit, sued, countersue, settlement, class action, legal/court
-battle, verdict, plaintiff/defendant, deposition, testifies, litigation), and career conflict
-carried over from the original filter (fired, ousted, slams) — the lawsuit/career words stay
-genuinely ambiguous between a personal dispute and routine business/contract litigation,
-disambiguated by `ROUTINE_BUSINESS_RE` (renamed from `BUSINESS_OUTCOME_RE`), not by removing
-them.
+and lawsuits/legal disputes (lawsuit, sued, countersue, settlement, class action, legal/court
+battle, verdict, plaintiff/defendant, deposition, testifies, litigation, accused) — the
+lawsuit words stay genuinely ambiguous between a personal dispute and routine business/
+contract litigation, disambiguated by `ROUTINE_BUSINESS_RE` (renamed from
+`BUSINESS_OUTCOME_RE`), not by removing them. Pure career/business words ("fired", "ousted",
+"shake-up", "slams", "blasts", "rift", "fallout") were REMOVED entirely — see learnings below.
 
 Confirmed learnings so far:
 - Removed (too weak/generic, spammed the feed with routine business news): "resigns"/"steps
@@ -99,6 +105,14 @@ Confirmed learnings so far:
   spams the feed). Same watch now applies to "settlement"/"litigation" for the same reason —
   a routine corporate settlement/litigation story could still slip through if it doesn't also
   trip `ROUTINE_BUSINESS_RE`.
+- Removed "fired"/"ousted"/"shake-up"/"slams"/"blasts"/"rift"/"fallout" entirely, per explicit
+  instruction to remove finance/business news from the feed altogether and keep it to
+  off-work personal issues and lawsuits. These words each describe a pure CAREER/business
+  event on their own -- "Exec fired amid boardroom shake-up" needed no deal/earnings/stock
+  language at all to pass before, so `ROUTINE_BUSINESS_RE` (which only fires on those) could
+  never have caught it. Verified via 15 synthetic headlines (6 business-event negatives, 6
+  personal/lawsuit positives, 3 prior regressions) that this didn't disturb anything else
+  before shipping.
 
 If a story doesn't clear all five, it doesn't get posted — better to post less than to post
 something that reads as a fabricated or exaggerated claim about a real person.
