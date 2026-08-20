@@ -45,7 +45,11 @@ DRY_RUN          = os.getenv("DRY_RUN", "true").lower() == "true"
 NEWS_FRESHNESS_HOURS = int(os.getenv("NEWS_FRESHNESS_HOURS", "48"))
 GOSSIP_SEEN_MEMORY_DAYS = int(os.getenv("GOSSIP_SEEN_MEMORY_DAYS", "14"))
 MAX_POSTS_PER_CYCLE = int(os.getenv("MAX_POSTS_PER_CYCLE", "3"))
-POST_PACING_SECONDS = int(os.getenv("POST_PACING_SECONDS", "45"))
+# Several minutes, not seconds, between successive posts in the same cycle -- per explicit
+# instruction, since rapid-fire posting is exactly the pattern X's own bot-behavior detection
+# flags. 45s (the old default) was too tight; this was also NOT being set by bot.yml at all,
+# so the deployed workflow was silently relying on whatever this fallback happened to be.
+POST_PACING_SECONDS = int(os.getenv("POST_PACING_SECONDS", "240"))
 
 STATE_FILE   = "state.json"
 SESSION_FILE = "twitter_session.json"
@@ -988,8 +992,13 @@ def run_cycle():
             })
             save_state(state)
             if i < len(items) - 1:
-                # Brief pacing gap between multiple posts in one cycle so they don't land
-                # seconds apart — reads as paced coverage, not a bot dumping a queue.
+                # Multiple posts in one cycle are ALWAYS fired one at a time in this loop --
+                # there is no threading/async/concurrency anywhere in this file, so it is
+                # structurally impossible for two posts to go out in parallel. This sleep is
+                # what spaces them out in TIME as well: X's own spam heuristics flag rapid-
+                # fire posting, so successive posts in the same cycle are paced several
+                # minutes apart (POST_PACING_SECONDS), not seconds -- reads as paced human-
+                # like coverage, not a bot dumping a queue.
                 time.sleep(POST_PACING_SECONDS)
 
     log.info("Posted %d/%d item(s) this cycle (cap: %d).", posted, len(items), MAX_POSTS_PER_CYCLE)

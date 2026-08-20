@@ -266,8 +266,14 @@ safe preview by default), and since every trigger is now `workflow_dispatch`, an
 that omits `inputs.dry_run` silently falls back to that same default and never actually posts.
 
 Each cycle can post up to `MAX_POSTS_PER_CYCLE` (default 3) distinct stories in one run, found
-from a single fetch pass (not by re-fetching per post), with a `POST_PACING_SECONDS` gap
-(default 45s) between successive posts in the same cycle so they don't land seconds apart.
+from a single fetch pass (not by re-fetching per post). Posts within a cycle are always fired
+one at a time in a plain sequential loop -- there is no threading/async/concurrency anywhere
+in `gossip_bot.py`, so it's structurally impossible for two posts to go out in parallel, which
+is exactly the pattern X's own bot-behavior detection flags. They're also spaced apart in TIME
+via a `POST_PACING_SECONDS` gap (default 240s / 4 minutes, not seconds) between successive
+posts in the same cycle -- `bot.yml` explicitly sets this in its "Write env file" step (it
+didn't before, which meant the deployed bot was silently relying on `gossip_bot.py`'s own
+fallback default rather than an explicit, reviewed value).
 
 Cross-candidate dedup uses a real word-overlap similarity check (`_headline_similarity`,
 threshold 0.5), not exact-string matching — confirmed live that the same story routinely

@@ -59,6 +59,10 @@ jobs:
           # actually posts. See DESIGN.md for the exact cron-job.org request configuration.
           echo "DRY_RUN=${{ inputs.dry_run }}" >> my.env
           echo "MAX_POSTS_PER_CYCLE=3" >> my.env
+          # Several minutes between successive posts in the same cycle, not seconds -- this
+          # was NOT being set here before, so the deployed bot was silently relying on
+          # gossip_bot.py's own fallback default rather than an explicit, reviewed value.
+          echo "POST_PACING_SECONDS=240" >> my.env
 
       - name: Decode Twitter session
         run: echo "${{ secrets.TWITTER_SESSION }}" | base64 -d > twitter_session.json
