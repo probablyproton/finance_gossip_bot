@@ -61,9 +61,12 @@ overdose, DUI), legal/criminal-personal (arrest, jail, indictment, assault, hara
 fined), family drama (disowned, inheritance/estate battles), interpersonal conflict (feud,
 rivalry, clash, brawl, confrontation, shouting/screaming match, fistfight), public
 embarrassment/oddity (scandal, bizarre, exposed, leaked photos/texts, caught, spotted with),
-and career/legal words carried over from the original filter (lawsuit, fired, ousted, slams)
-that stay genuinely ambiguous between personal and professional conflict — disambiguated by
-`ROUTINE_BUSINESS_RE` (renamed from `BUSINESS_OUTCOME_RE`), not by removing them.
+lawsuits/legal disputes (lawsuit, sued, countersue, settlement, class action, legal/court
+battle, verdict, plaintiff/defendant, deposition, testifies, litigation), and career conflict
+carried over from the original filter (fired, ousted, slams) — the lawsuit/career words stay
+genuinely ambiguous between a personal dispute and routine business/contract litigation,
+disambiguated by `ROUTINE_BUSINESS_RE` (renamed from `BUSINESS_OUTCOME_RE`), not by removing
+them.
 
 Confirmed learnings so far:
 - Removed (too weak/generic, spammed the feed with routine business news): "resigns"/"steps
@@ -85,10 +88,17 @@ Confirmed learnings so far:
   personal-drama headline essentially never shares a sentence with those.
 - Added "fined" (personal court/regulatory fine) and "bizarre" (the "weird things" category)
   per explicit request; both verified against synthetic test headlines before shipping.
+- Expanded lawsuits/legal disputes beyond just "lawsuit"/"sued" per explicit request:
+  countersue, settlement/settles, class action, legal/court battle, verdict, plaintiff,
+  defendant, deposition, testifies, litigation. Verified against 9 synthetic headlines,
+  including that "Company settles antitrust lawsuit with regulators for $500 million" still
+  correctly gets rejected by `ROUTINE_BUSINESS_RE` before shipping.
 - Moderate-risk words being watched, not yet removed: "charged" (could mean personally
   charged with a crime, or a company charged with a regulatory violation — kept for now since
   per-person search means the headline names the person, not the company, but flag if this
-  spams the feed).
+  spams the feed). Same watch now applies to "settlement"/"litigation" for the same reason —
+  a routine corporate settlement/litigation story could still slip through if it doesn't also
+  trip `ROUTINE_BUSINESS_RE`.
 
 If a story doesn't clear all five, it doesn't get posted — better to post less than to post
 something that reads as a fabricated or exaggerated claim about a real person.

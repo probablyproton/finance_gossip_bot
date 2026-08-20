@@ -102,9 +102,15 @@ GOSSIP_SIGNAL_RE = re.compile(
     # request -- kept to the rarer, more specifically tabloid-flavored word to limit noise)
     r"scandal|drama|bizarre|expos(?:e|es|ed)|leaked?\s+(?:photos?|texts?|messages?|audio|video)|"
     r"caught|spotted\s+(?:with|dating)|fling|tryst|hookup|"
-    # Career/legal conflict carried over from before -- still genuinely ambiguous between
-    # personal and professional, disambiguated by ROUTINE_BUSINESS_RE below
-    r"lawsuit|sues?|sued|fired|ousted|slams?|blasts?(?:ed)?|accus\w+|shake-?up|rift|fallout"
+    # Lawsuits / legal disputes, expanded per explicit request beyond just "lawsuit"/"sued" --
+    # still genuinely ambiguous between a personal dispute and routine business/contract
+    # litigation, so still disambiguated by ROUTINE_BUSINESS_RE below, not by scoping the
+    # words themselves.
+    r"lawsuit\w*|sues?|sued|countersue\w*|settlement|settles?|class[- ]action|"
+    r"legal\s+battle|court\s+battle|files?\s+(?:a\s+)?lawsuit|verdict|plaintiff|defendant|"
+    r"deposition|testif(?:y|ies|ied)|litigation|"
+    # Career conflict carried over from before -- same disambiguation
+    r"fired|ousted|slams?|blasts?(?:ed)?|accus\w+|shake-?up|rift|fallout"
     r")\b",
     re.I,
 )
@@ -846,7 +852,9 @@ _OPENER_CATEGORIES = [
     (re.compile(r"\b(scandal|expos(?:e|es|ed)|leaked?\s+(?:photos?|texts?|messages?|audio|video)|"
                 r"caught|spotted\s+(?:with|dating)|fling|tryst|hookup)\b", re.I),
      ["Scandal watch:", "This is getting messy:", "Well, this came out:"]),
-    (re.compile(r"\b(lawsuit|sues?|sued|fired|ousted|feud|rivalry|clash(?:es)?)\b", re.I),
+    (re.compile(r"\b(lawsuit\w*|sues?|sued|countersue\w*|settlement|settles?|class[- ]action|"
+                r"legal\s+battle|court\s+battle|verdict|plaintiff|defendant|deposition|"
+                r"testif(?:y|ies|ied)|litigation|fired|ousted|feud|rivalry|clash(?:es)?)\b", re.I),
      ["Courtroom drama:", "Legal drama:", "This just got messy:"]),
 ]
 _GENERIC_OPENERS = ["Finance gossip alert:", "The rumor mill is turning:", "This is making the rounds:"]
