@@ -269,6 +269,25 @@ _FUNCTION_WORDS_RE = re.compile(
     r"\b(the|a|an|of|in|to|and|is|was|but|for|with|he|she|his|her|that|on|as|by)\b", re.I)
 _MIN_FUNCTION_WORD_HITS = 5
 
+# Author-bio boilerplate ("Yash is a crypto analyst specializing in price analysis,
+# predictions, and in-depth research reports.") passes every check above -- it's genuine,
+# well-formed prose with plenty of function words, not site navigation -- but it's a
+# description of the ARTICLE'S AUTHOR, not the actual story. Confirmed live: this got posted
+# verbatim while the real headline ("Why Justin Sun Lawsuit Against World Liberty Stays
+# Publicly Important?") sat unused. Common on crypto/finance blogs that inject an author-bio
+# block near the top of the page. Detects the shape -- "<1-3 capitalized words> is a/an
+# <journalism/content-creation role>" -- rather than naming every site's exact bio wording.
+# The role list is deliberately narrow to journalism/content-creation professions: a REAL
+# gossip lede introducing a titan uses roles like "hedge fund billionaire"/"CEO"/"founder",
+# essentially never "analyst"/"writer"/"journalist", so this shouldn't catch genuine ledes
+# that happen to open with "<Name> is a ...".
+_AUTHOR_BIO_RE = re.compile(
+    r"^[A-Z][\w.'-]+(?:\s+[A-Z][\w.'-]+){0,2}\s+is\s+an?\s+.{0,60}?"
+    r"(analyst|writer|journalist|reporter|editor|contributor|researcher|correspondent|"
+    r"blogger|content\s+creator)",
+    re.I,
+)
+
 
 # A single Unicode ellipsis char ("…", one codepoint that renders as three dots) is ALWAYS a
 # truncation signal by itself, optionally followed by one more literal period (the real
@@ -328,6 +347,8 @@ def fetch_article_context(url: str, max_chars: int = 300) -> str:
             candidate = text[:max_chars]
             if _NAV_JUNK_RE.search(candidate):
                 continue
+            if _AUTHOR_BIO_RE.search(candidate):
+                continue  # reads like an author-bio blurb, not the article's own content
             if len(_FUNCTION_WORDS_RE.findall(candidate)) < _MIN_FUNCTION_WORD_HITS:
                 continue  # reads like a nav/breadcrumb block, not a real sentence
             candidate = _strip_source_truncation(candidate)
