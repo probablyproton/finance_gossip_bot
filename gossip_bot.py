@@ -256,7 +256,15 @@ def _resolve_google_news_url(link: str) -> str:
 
 _NAV_JUNK_RE = re.compile(
     r"\b(subscribe|sign up|newsletter|cookie|log\s*in|advertisement|follow us|read more|"
-    r"share this|related articles|menu|sections|navigation|Add The .+ on Google)\b",
+    r"share this|related articles|menu|sections|navigation|Add The .+ on Google|"
+    # Affiliate/sponsor disclosure boilerplate, and the "add us to Google News" nag some
+    # sites glue directly onto that same block -- confirmed live: this exact text ("This post
+    # may contain links from our sponsors and affiliates ... How to Add Us to Google News
+    # Sending You to Google News in 3") is dense, well-formed prose (passes the function-word
+    # check below on its own merits) but is boilerplate, not the article, and got posted
+    # verbatim in place of the real lede/headline.
+    r"sponsors?\s+and\s+affiliates|receive\s+compensation|affiliate\s+links?|"
+    r"add\s+us\s+to\s+google\s+news|google\s+news\s+in\s+\d)\b",
     re.I,
 )
 
