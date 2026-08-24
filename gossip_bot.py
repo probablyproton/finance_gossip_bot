@@ -288,6 +288,42 @@ _AUTHOR_BIO_RE = re.compile(
     re.I,
 )
 
+# Blocklisting each new shape of junk one at a time (nav dumps, author bios, ...) is a losing
+# battle -- confirmed live by FOUR separate incidents in a row, each a completely different
+# shape: a publisher "Trust Project"/share-button badge, a notification-permission prompt, a
+# "Quote of the Day" widget, and (worst) an entirely unrelated article's snippet bleeding in
+# from an aggregator page. None of the four shared a single real word with the headline they
+# were supposedly the context for. Rather than naming a fifth, sixth, seventh shape, this
+# checks RELEVANCE directly: does the candidate paragraph actually share real content with
+# the headline it's meant to expand on? Any genuine lede about that story does; site chrome,
+# widgets, and other articles' content never do.
+_GENERIC_HEADLINE_WORDS = {
+    "the", "a", "an", "of", "in", "to", "and", "is", "was", "but", "for", "with", "he", "she",
+    "his", "her", "that", "on", "as", "by", "after", "over", "about", "their", "its", "has",
+    "have", "had", "been", "being", "will", "would", "could", "should", "may", "might", "not",
+    "no", "do", "does", "did", "from", "says", "said", "new", "amid", "following", "into",
+    "than", "more", "was", "were", "you", "your", "our", "who", "this",
+}
+
+
+def _significant_words(text: str) -> set:
+    return {w for w in re.findall(r"[a-z0-9']+", text.lower())
+            if w not in _GENERIC_HEADLINE_WORDS and len(w) > 2}
+
+
+def _context_matches_headline(candidate: str, headline: str) -> bool:
+    """Requires the extracted context to share at least a couple of the headline's own
+    significant words -- confirmed live this is exactly what every junk-text incident so far
+    has in common: zero overlap with the real headline, regardless of what kind of junk it
+    was. A genuine lede about the actual story virtually always repeats a name or key term
+    from its own headline, even when paraphrased. If the headline itself has fewer than 2
+    significant words, requires whatever's available instead of an impossible bar."""
+    headline_words = _significant_words(headline)
+    if not headline_words:
+        return True  # nothing usable to check against -- don't block on this alone
+    overlap = headline_words & _significant_words(candidate)
+    return len(overlap) >= min(2, len(headline_words))
+
 
 # A single Unicode ellipsis char ("…", one codepoint that renders as three dots) is ALWAYS a
 # truncation signal by itself, optionally followed by one more literal period (the real
@@ -319,14 +355,19 @@ def _strip_source_truncation(text: str) -> str:
     return " ".join(complete)
 
 
-def fetch_article_context(url: str, max_chars: int = 300) -> str:
+def fetch_article_context(url: str, headline: str, max_chars: int = 300) -> str:
     """Best-effort extraction of the article's own opening paragraph, so the tweet can carry
     real substance instead of just a headline — confirmed empirically that Google News RSS's
     <description> gives nothing beyond the headline itself (just an HTML restatement), while
     direct outlet feeds (Page Six, NY Post) DO have genuine excerpts. Rather than depending on
     which search path happened to find a story, this fetches the resolved article URL
     directly and works the same way regardless of source. Returns '' on any failure — a fetch
-    failure just means a shorter tweet, never fabricated content."""
+    failure just means a shorter tweet, never fabricated content.
+
+    headline is required (not optional) so every candidate paragraph can be checked for
+    actual relevance to the real story -- see _context_matches_headline, added after
+    multiple site-chrome/widget/wrong-article snippets got posted as if they were genuine
+    article content."""
     if not url:
         return ""
     try:
@@ -351,6 +392,9 @@ def fetch_article_context(url: str, max_chars: int = 300) -> str:
                 continue  # reads like an author-bio blurb, not the article's own content
             if len(_FUNCTION_WORDS_RE.findall(candidate)) < _MIN_FUNCTION_WORD_HITS:
                 continue  # reads like a nav/breadcrumb block, not a real sentence
+            if not _context_matches_headline(candidate, headline):
+                continue  # well-formed prose, but shares nothing with the actual story --
+                          # site chrome, a widget, or a different article entirely
             candidate = _strip_source_truncation(candidate)
             if not candidate:
                 continue  # this slice was ENTIRELY a truncated teaser -- try the next <p>
@@ -988,7 +1032,7 @@ def run_cycle():
                 continue
             # Same principle for the context fetch — it's what makes clicking the link
             # unnecessary, but only worth the extra request for items actually being posted.
-            item["context"] = fetch_article_context(item["link"])
+            item["context"] = fetch_article_context(item["link"], item["headline"])
             ok = post_tweet(generate_tweet(item), state)
         if ok == "skip":
             # This specific candidate's compose render failed validation (see
