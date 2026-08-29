@@ -120,7 +120,8 @@
     "https://news.google.com/rss/articles/cbmiqafbvv95cuxownzjvjv0ltrlmwrkyknanhk2odhnetrydhzhrepfu2fivknrrg84bvhoegvmm0w3rfnltejpcklcrtrqzxntdk1dejy5ruriu1bhykvrn3g1rc05ul9mt1a0q2rjwgdkuujuv3qwulfjagdszwrqq04xbloyvupobll1r0xlczv6dxq5v19pqva5yvpfqtfoyk9evu1zyzlpek9tdvnlcmc?oc=5": "2026-08-28",
     "https://news.google.com/rss/articles/cbmidkfvx3lxte9srkpnd1llvmfryzfnnlhswhbqv1nnzejmdzlccmnyt1fuz2nzc1g1d3zbtjl1afdqskzlnzdmrursvensu0d6u0hqszloawdxy0nwmkjnd21zbhffrzlybthtumhfuhkwshrldetda3l2wud2ove?oc=5": "2026-08-28",
     "https://news.google.com/rss/articles/cbmipafbvv95cuxncljlmzhqagdkclzrwex5dzfzylbstjreadfyz3p2nnhuc3bwa3m4q0o1efr6wjnxdke2ani1y204vuwwzzzmdww1axg0vxfnuwvkugnjau5rbtc5n0jkrdezehlzy2vpx0s4bhdhnecxoxprd2fysjfnbellz1zjtkrzrnbwskhqzti2rjrmdehlzfbebulvukfidnp5wgqza3vmbw?oc=5": "2026-08-28",
-    "https://news.google.com/rss/articles/cbmilafbvv95cuxos1zjau56qjjrd29jvulnc3vxcwi3d1k3qjzyvflux01ycflztkxeedzwnudsdxkxz1vsx2jxcjrxruxinkj3rldbafp3ohrretdwvdheuegzz3zsndhidevymedpcmdisudfb3ppoe1wb1i0z2jjbjuwuvjpnxg2shlmykfhexk4oc1hqlnxeetyv09c?oc=5": "2026-08-29"
+    "https://news.google.com/rss/articles/cbmilafbvv95cuxos1zjau56qjjrd29jvulnc3vxcwi3d1k3qjzyvflux01ycflztkxeedzwnudsdxkxz1vsx2jxcjrxruxinkj3rldbafp3ohrretdwvdheuegzz3zsndhidevymedpcmdisudfb3ppoe1wb1i0z2jjbjuwuvjpnxg2shlmykfhexk4oc1hqlnxeetyv09c?oc=5": "2026-08-29",
+    "https://news.google.com/rss/articles/cbmiowfbvv95cuxqrudlvxhbu0dadjvhrg10tffyu2wwwhdyenlgsgzkuvutchv2yvdrn25ks3c0cedrwhhey054x3c4suszujdduvrxdzjwskc2n2zxexfwehi5mjgtqmlzqjfiyu1tz2p5ctb5sue5mwttbhrjylq3edlzulfxr0jhoeffyjd2qzf6mexhrnvntzq1tna3a3ffr0tqyvvwvc1ycxzn?oc=5": "2026-08-29"
   },
   "posted_signatures": [
     {
@@ -671,6 +672,11 @@
     {
       "headline": "What Meta bought with its $18 billion settlement",
       "person": "Mark Zuckerberg",
+      "date": "2026-08-29"
+    },
+    {
+      "headline": "OpenAI to end agreement with SpaceX's AI coding tool Cursor, deepening Musk-Altman clash",
+      "person": "Sam Altman",
       "date": "2026-08-29"
     }
   ]
