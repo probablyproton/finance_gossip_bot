@@ -256,9 +256,29 @@ def _resolve_google_news_url(link: str) -> str:
 
 _NAV_JUNK_RE = re.compile(
     r"\b(subscribe|sign up|newsletter|cookie|log\s*in|advertisement|follow us|read more|"
-    r"share this|related articles|menu|sections|navigation|Add The .+ on Google)\b",
+    r"share this|related articles|menu|sections|navigation|Add The .+ on Google|"
+    # Affiliate/sponsor disclosure boilerplate, and the "add us to Google News" nag some
+    # sites glue directly onto that same block -- confirmed live: this exact text ("This post
+    # may contain links from our sponsors and affiliates ... How to Add Us to Google News
+    # Sending You to Google News in 3") is dense, well-formed prose (passes the function-word
+    # check below on its own merits) but is boilerplate, not the article, and got posted
+    # verbatim in place of the real lede/headline.
+    r"sponsors?\s+and\s+affiliates|receive\s+compensation|affiliate\s+links?|"
+    r"add\s+us\s+to\s+google\s+news|google\s+news\s+in\s+\d|"
+    # Corporate-ownership/copyright footer boilerplate -- same failure shape as the affiliate
+    # disclosure above (dense, well-formed prose that isn't the article), confirmed live on a
+    # second, differently-worded site footer: "StyleCaster is a part of PMX Global, LLC, a
+    # subsidiary of Penske Media Corporation. (c) 2026 SheMedia, LLC. All rights reserved....".
+    # Kept as the general shape ("is a part of"/"subsidiary of"/"all rights reserved"), not
+    # this one site's exact wording, since every outlet phrases its own footer differently.
+    r"is\s+a\s+part\s+of|is\s+a\s+division\s+of|subsidiary\s+of|all\s+rights\s+reserved)\b",
     re.I,
 )
+
+# Same corporate-footer signal as above, but for the copyright symbol itself -- kept out of
+# _NAV_JUNK_RE's \b-delimited alternation since "©" isn't a word character and \b wouldn't
+# match around it the way it does for the other, all-alphabetic phrases.
+_COPYRIGHT_SYMBOL_RE = re.compile(r"[©℗]|\(c\)\s*\d{4}", re.I)
 
 # Real prose is dense with short function words ("the", "of", "a", "his", "but", ...); a
 # nav/breadcrumb block strung from Title Case category labels ("US News Metro Long Island
@@ -388,6 +408,8 @@ def fetch_article_context(url: str, headline: str, max_chars: int = 300) -> str:
             candidate = text[:max_chars]
             if _NAV_JUNK_RE.search(candidate):
                 continue
+            if _COPYRIGHT_SYMBOL_RE.search(candidate):
+                continue  # corporate-ownership/copyright footer boilerplate, not the article
             if _AUTHOR_BIO_RE.search(candidate):
                 continue  # reads like an author-bio blurb, not the article's own content
             if len(_FUNCTION_WORDS_RE.findall(candidate)) < _MIN_FUNCTION_WORD_HITS:
@@ -799,9 +821,16 @@ def generate_tweet(item: dict) -> str:
             kept.append(s)
             total += added
         if kept:
-            body = "\n\n".join(kept) + "…"
+            # No trailing "…" here -- per explicit request, a dropped later sentence should
+            # never read as a thought cut off mid-point. Each kept sentence is already
+            # complete (that's the whole point of cutting on sentence boundaries, not just
+            # word boundaries), so it reads as a normal, finished thought; the link right
+            # after it is what invites reading further, not an ellipsis implying breakage.
+            body = "\n\n".join(kept)
         else:
-            # Even the first sentence alone doesn't fit -- fall back to a word-boundary cut.
+            # Even the first sentence alone doesn't fit -- there's no complete sentence left
+            # to end on, so this genuinely is a mid-thought cut, and "…" is the honest way to
+            # signal that (unlike the branch above).
             body = body[:max_len].rsplit(" ", 1)[0] + "…"
 
     text = body
