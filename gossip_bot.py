@@ -777,9 +777,16 @@ def generate_tweet(item: dict) -> str:
             kept.append(s)
             total += added
         if kept:
-            body = "\n\n".join(kept) + "…"
+            # No trailing "…" here -- per explicit request, a dropped later sentence should
+            # never read as a thought cut off mid-point. Each kept sentence is already
+            # complete (that's the whole point of cutting on sentence boundaries, not just
+            # word boundaries), so it reads as a normal, finished thought; the link right
+            # after it is what invites reading further, not an ellipsis implying breakage.
+            body = "\n\n".join(kept)
         else:
-            # Even the first sentence alone doesn't fit -- fall back to a word-boundary cut.
+            # Even the first sentence alone doesn't fit -- there's no complete sentence left
+            # to end on, so this genuinely is a mid-thought cut, and "…" is the honest way to
+            # signal that (unlike the branch above).
             body = body[:max_len].rsplit(" ", 1)[0] + "…"
 
     text = body
