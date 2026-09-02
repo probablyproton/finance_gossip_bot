@@ -146,7 +146,15 @@ ROUTINE_BUSINESS_RE = re.compile(
     r"earnings|quarterly\s+results?|revenue|q[1-4]\s+results?|guidance|dividend|buyback|"
     r"shares?\s+(?:rose|fell|surged?|dropped?|jumped?|rallied|slid|slumped)|stock\s+price|"
     r"market\s+cap|valuation|layoffs?|job\s+cuts|"
-    r"tariff|antitrust|interest\s+rate|monetary\s+policy|rate\s+(?:hike|cut|decision))\b",
+    r"tariff|antitrust|interest\s+rate|monetary\s+policy|rate\s+(?:hike|cut|decision)|"
+    # Government/corporate contract news -- confirmed live: a Jeff Bezos/Blue Origin NASA
+    # contract story matched GOSSIP_SIGNAL_RE (almost certainly on "lawsuit"/"legal battle"/
+    # "settlement" language describing a contract dispute or bid protest) despite having
+    # nothing to do with personal drama. "Contract"/"NASA"/procurement vocabulary wasn't
+    # covered by any existing routine-business term.
+    r"nasa|contract\s+award|awarded\s+(?:a|the)?\s*contract|wins?\s+(?:a|the)?\s*contract|"
+    r"government\s+contract|federal\s+contract|defense\s+contract|space\s+contract|"
+    r"launch\s+contract|bid\s+protest|procurement)\b",
     re.I,
 )
 
