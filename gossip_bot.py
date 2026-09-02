@@ -308,6 +308,28 @@ _AUTHOR_BIO_RE = re.compile(
     re.I,
 )
 
+# Some sites glue a category tag + repeated headline + byline + publish date directly onto
+# the front of the SAME <p> as the real article text, with no separator -- confirmed live:
+# "Whitepapers A $6.2 Billion Divorce Fight Could Shift The Balance of Power At Two Sigma The
+# Wealth Advisor Contributor September 1, 2026 Two Sigma co-founder John Overdeck is
+# fighting..." where everything up through the date is page furniture, not the article.
+# Unlike the other boilerplate shapes above, rejecting the whole <p> here would throw away
+# real, usable content sitting right after the junk -- so this strips the junk PREFIX instead
+# of rejecting the candidate outright. A publish dateline ("<Month> <Day>, <Year>") this early
+# in the paragraph, immediately followed by a capitalized word, is a reliable boundary for
+# where that furniture ends and real prose begins; the trailing lookahead avoids stripping a
+# genuine sentence that happens to open with a date ("On September 1, 2026, filings show...")
+# by requiring what follows to look like the start of a new sentence, not a continuation.
+_LEADING_DATELINE_RE = re.compile(
+    r"^.{0,200}?\b(?:January|February|March|April|May|June|July|August|September|October|"
+    r"November|December)\s+\d{1,2},\s*\d{4}\b\s*(?=[A-Z])"
+)
+
+
+def _strip_leading_dateline_junk(text: str) -> str:
+    m = _LEADING_DATELINE_RE.match(text)
+    return text[m.end():] if m else text
+
 
 # A single Unicode ellipsis char ("…", one codepoint that renders as three dots) is ALWAYS a
 # truncation signal by itself, optionally followed by one more literal period (the real
@@ -355,6 +377,7 @@ def fetch_article_context(url: str, max_chars: int = 300) -> str:
         body = re.sub(r"(?is)<script.*?</script>|<style.*?</style>", " ", resp.text)
         for p in re.findall(r"(?is)<p[^>]*>(.*?)</p>", body):
             text = re.sub(r"\s+", " ", html_module.unescape(re.sub(r"<[^>]+>", " ", p))).strip()
+            text = _strip_leading_dateline_junk(text)
             if len(text) < 80:
                 continue
             # Validate the ACTUAL slice we're about to output, not the full raw <p> text --
